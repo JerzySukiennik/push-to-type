@@ -1,0 +1,8 @@
+// Bridges the statically built whisper.cpp into Swift.
+//
+// The header and the archives are produced by Scripts/build-whisper.sh from the pinned
+// Vendor/whisper.cpp submodule; paths are relative to this module map.
+module CWhisper {
+    header "../../.build/whisper/include/whisper.h"
+    export *
+}

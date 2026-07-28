@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>PushToType</string>
+    <key>CFBundleDisplayName</key>
+    <string>PushToType</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.gzowo.PushToType</string>
+    <key>CFBundleExecutable</key>
+    <string>PushToType</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+
+    <!-- Menu bar only: no Dock icon, no app menu, no window at launch. -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+
+    <!-- Shown in the microphone permission prompt. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>PushToType records only while you hold the dictation shortcut. Speech is transcribed on this Mac and never leaves it.</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Offline dictation. No cloud, no account, no telemetry.</string>
+</dict>
+</plist>

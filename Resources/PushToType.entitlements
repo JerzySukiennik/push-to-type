@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        PushToType is intentionally NOT sandboxed.
+
+        The Accessibility API reaches into other applications' text fields, and a global
+        hotkey observes keys system-wide; neither is possible from inside the App Sandbox,
+        and no entitlement grants them. The app is therefore distributed outside the Mac
+        App Store, and its guarantees come from being offline rather than from the sandbox.
+
+        These entitlements matter only when the app is signed with the hardened runtime for
+        notarised distribution; the local ad-hoc build ignores them.
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
+    <false/>
+</dict>
+</plist>
