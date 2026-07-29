@@ -56,7 +56,9 @@ Zero-dependency leaf module.
   `.microphoneDenied`, `.accessibilityDenied`, `.emptyRecording`, `.transcriptionFailed`,
   `.audioEngineFailed`, `.downloadFailed`), each with a user-facing `title`/`recovery`.
 - `AppPaths` — Application Support / model directory resolution, created lazily.
-- `AsyncDebouncer`, `Atomic<T>` — small primitives used by more than one module.
+- `VoiceActivity` — `vDSP`-backed RMS, peak, "is this silent", and "has the speaker paused
+  long enough to cut here". It sits in the leaf module because two unrelated callers need
+  it: `PTTAudio` to reject a silent recording, `PTTWhisper` to find chunk boundaries.
 
 ### `PTTSettings` — Preferences & catalogs
 - `SettingsStore` — `@MainActor @Observable` façade over `UserDefaults`. Every setting
@@ -75,12 +77,14 @@ Zero-dependency leaf module.
   and appends into a pre-allocated ring buffer. On `stop()` it removes the tap, stops the
   engine and returns the captured `[Float]`. Engine objects are torn down so the audio HAL
   releases the mic (no orange dot while idle).
-- `AudioChunkStream` — an `AsyncStream<[Float]>` of ~100 ms frames used by the streaming
-  transcriber; unbuffered when streaming is off.
 - `MicrophonePermission` — `AVCaptureDevice.authorizationStatus/requestAccess` wrapper
-  with async/await, plus the deep link to System Settings.
-- `VoiceActivity` — cheap RMS + zero-crossing gate used for two things: deciding a
-  recording is silent (`.emptyRecording`) and finding safe chunk boundaries for streaming.
+  with async/await, plus the deep link to System Settings and an "is there any input
+  device at all" probe, so "denied" and "unplugged" stay different errors.
+- `AudioFileLoader` — decodes a file to the same 16 kHz mono format. The app never reads
+  files; this exists so the diagnostics tool and the tests share one conversion path with
+  the recorder instead of each carrying a copy.
+- `CallLocal<Value>` — the audited box that carries a buffer into `AVAudioConverter`'s
+  nominally-`@Sendable` input block, which is in fact invoked synchronously.
 
 ### `PTTWhisper` — Inference
 - `ModelManager` (**actor**) — resolves the model file, downloads it with
@@ -157,6 +161,15 @@ Zero-dependency leaf module.
   press-release-press sequence can never interleave two dictations.
 - `LoginItemManager` — `SMAppService.mainApp` register/unregister for "Start at Login".
 
+### `PTTDoctor` — `ptt-doctor`
+A second executable, and a deliberate addition to the original plan. The Command Line
+Tools ship neither XCTest nor Swift Testing, so `swift test` cannot run on the target
+machine at all. Rather than call an unrunnable suite "tested", the project also carries a
+diagnostics command that verifies what only a real machine can answer: the model file's
+integrity, that whisper.cpp links and runs, how fast inference is *here*, whether an input
+device exists, and which permissions are granted. It caught two real defects the moment it
+first ran.
+
 ---
 
 ## 3. Dependencies
@@ -184,15 +197,17 @@ PushToType/
 ├── Package.swift
 ├── ARCHITECTURE.md
 ├── README.md
-├── Vendor/whisper.cpp/                 # git submodule (pinned)
+├── Vendor/whisper.cpp/                 # git submodule, pinned at v1.9.1
 ├── Scripts/
 │   ├── build-whisper.sh                # cmake → .build/whisper/lib*.a
 │   ├── build-app.sh                    # swift build + .app assembly + codesign
-│   └── run.sh                          # build & launch
+│   ├── run.sh                          # build & launch
+│   └── make-icon.swift                 # renders Resources/AppIcon.icns in code
 ├── Resources/
 │   ├── Info.plist                      # LSUIElement, NSMicrophoneUsageDescription
 │   ├── PushToType.entitlements
 │   └── AppIcon.icns
+├── Tests/PushToTypeTests/              # swift-testing; needs Xcode to run
 └── Sources/
     ├── CWhisper/                       # module.modulemap + shim.h
     ├── PTTSupport/                     # Log, PTTError, AppPaths, primitives
@@ -202,7 +217,8 @@ PushToType/
     ├── PTTHotkeys/                     # CarbonHotkeyMonitor, HotkeyRecorder
     ├── PTTInsertion/                   # AXTextInserter, ClipboardInserter, AccessibilityPermission
     ├── PTTUI/                          # MenuBarController, HUD, Settings, Onboarding
-    └── PushToType/                     # AppDelegate, DictationController, LoginItemManager
+    ├── PushToType/                     # AppDelegate, DictationController, LoginItemManager
+    └── PTTDoctor/                      # the ptt-doctor diagnostics command
 ```
 
 ---
@@ -217,3 +233,20 @@ PushToType/
 6. `PTTInsertion` — AX + clipboard fallback.
 7. `PTTUI` — menu bar, HUD, settings.
 8. `PushToType` — controller wiring, Info.plist, `.app` assembly, signing.
+9. `PTTDoctor` — prove the whole stack works on real hardware, with real numbers.
+
+---
+
+## 6. Measured on the target machine
+
+MacBook Pro 16" 2019, Core i9-9880H, `base.en`, English:
+
+| | |
+|---|---|
+| Model load | 0.25 s |
+| Inference | 11.0 s of audio in 0.89 s — **12.4× real time** |
+| Idle CPU | 0.0% |
+| Idle memory | ~25 MB resident |
+
+A five-second dictation therefore needs about 0.4 s of inference without streaming, and
+roughly the length of the final phrase with it.
