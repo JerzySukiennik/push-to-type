@@ -28,10 +28,13 @@ public struct TranscriptPostProcessor: Sendable {
 
     private static let whitespaceRuns = try! NSRegularExpression(pattern: #"[ \t]{2,}"#)
 
-    /// Two or more dots. whisper writes these when the speaker hesitates, and a spoken
-    /// pause routinely comes back as `......` — faithful to the audio, wrong for a
-    /// sentence someone is about to send.
-    private static let dotRuns = try! NSRegularExpression(pattern: #"\.{2,}"#)
+    /// Hesitation: two or more dots, or the ellipsis character, in any combination.
+    ///
+    /// whisper writes these when the speaker pauses to think, and it emits **both** forms —
+    /// `......` and a single `…` — so matching only ASCII dots leaves half of them behind.
+    /// They are faithful to the audio and wrong for a sentence someone is about to send:
+    /// thinking out loud is not punctuation.
+    private static let hesitation = try! NSRegularExpression(pattern: #"(\.{2,}|…)+"#)
 
     /// A space that drifted in front of its punctuation, and repeated commas.
     private static let spaceBeforePunctuation = try! NSRegularExpression(pattern: #"\s+([,.!?;:…])"#)
@@ -55,16 +58,22 @@ public struct TranscriptPostProcessor: Sendable {
         // arrive with newlines in the middle of it.
         text = text.replacingOccurrences(of: "\n", with: " ")
 
+        // Hesitation is removed rather than tidied. Collapsing `......` to `…` still
+        // leaves the reader looking at the speaker thinking; the point of dictation is the
+        // sentence, not the pauses inside it.
+        //
+        // It becomes a space, not nothing, because whisper does not always leave one:
+        // "takimi…inno" would otherwise fuse into a word that was never said. The
+        // whitespace pass that follows cleans up the double spaces that creates, which is
+        // why it has to run afterwards.
+        text = Self.replace(Self.hesitation, in: text, with: " ")
+
         text = Self.whitespaceRuns.stringByReplacingMatches(
             in: text,
             range: NSRange(text.startIndex..., in: text),
             withTemplate: " "
         )
 
-        // Hesitation clean-up, in order: long dot runs become one ellipsis, duplicated
-        // commas collapse, punctuation loses the space that drifted in front of it, and
-        // anything left dangling at the very end goes.
-        text = Self.replace(Self.dotRuns, in: text, with: "…")
         text = Self.replace(Self.commaRuns, in: text, with: ", ")
         text = Self.replace(Self.spaceBeforePunctuation, in: text, with: "$1")
         text = Self.replace(Self.trailingHesitation, in: text, with: "")

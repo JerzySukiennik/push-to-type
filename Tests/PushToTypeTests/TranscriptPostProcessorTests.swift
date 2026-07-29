@@ -43,14 +43,17 @@ struct TranscriptPostProcessorTests {
         #expect(processor.process("École is fine") == "École is fine")
     }
 
-    @Test("Hesitation dots become one ellipsis")
-    func normalisesHesitation() {
+    @Test("Hesitation is removed, in both forms whisper emits")
+    func removesHesitation() {
         let processor = TranscriptPostProcessor(
             capitalizeFirstLetter: false,
             appendTrailingSpace: false
         )
-        #expect(processor.process("GSP, Gzowo...... i tak dalej") == "GSP, Gzowo… i tak dalej")
-        #expect(processor.process("no.. właśnie") == "no… właśnie")
+        #expect(processor.process("GSP, Gzowo...... i tak dalej") == "GSP, Gzowo i tak dalej")
+        #expect(processor.process("GSP… Gzowo... i tak") == "GSP Gzowo i tak")
+        // No space around the ellipsis: removing it outright would fuse two words into
+        // one that was never spoken.
+        #expect(processor.process("takimi…inno") == "takimi inno")
         // A single full stop is punctuation, not hesitation.
         #expect(processor.process("Koniec zdania. Nowe") == "Koniec zdania. Nowe")
     }
@@ -63,6 +66,7 @@ struct TranscriptPostProcessorTests {
         )
         // Releasing the key during a pause should not leave the pause in the text.
         #expect(processor.process("i jak się zastanawiam......") == "i jak się zastanawiam")
+        #expect(processor.process("i jak się zastanawiam…") == "i jak się zastanawiam")
         #expect(processor.process("coś tam,") == "coś tam")
         #expect(processor.process("zdanie.") == "zdanie.", "a real full stop survives")
     }
