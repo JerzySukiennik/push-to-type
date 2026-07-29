@@ -21,11 +21,16 @@ fi
 
 "$ROOT/Scripts/build-app.sh"
 
-# A running copy holds the hotkey and would keep the old binary alive in /Applications.
+# A running copy holds the hotkey and would keep the old binary alive. Kill every copy and
+# wait for them to actually go — a gentle pkill that returns before the process exits was
+# how two instances ended up running at once.
 if pgrep -x PushToType >/dev/null 2>&1; then
-    echo "==> Quitting the running instance"
-    pkill -x PushToType || true
-    sleep 0.5
+    echo "==> Quitting running instances"
+    pkill -9 -x PushToType || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        pgrep -x PushToType >/dev/null 2>&1 || break
+        sleep 0.2
+    done
 fi
 
 echo "==> Installing to $DESTINATION"

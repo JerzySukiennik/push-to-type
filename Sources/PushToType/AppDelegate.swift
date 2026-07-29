@@ -41,6 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Only one instance may run. Two would each register the global shortcuts and each
+        // process the same dictation — the transcript gets inserted twice, overlapping into
+        // nonsense. This is not hypothetical: a stale copy surviving a reinstall did exactly
+        // that. The newest launch wins, so a fresh build or a click always takes over.
+        Self.terminateOtherInstances()
+
         // A menu bar utility: no Dock icon, no app menu, no window on launch.
         NSApp.setActivationPolicy(.accessory)
 
@@ -93,6 +99,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         windows.showSettings()
         return true
+    }
+
+    // MARK: - Single instance
+
+    /// Terminates any other running copy of PushToType, so exactly one is live.
+    ///
+    /// Matched by bundle identifier, which every copy shares regardless of the path it was
+    /// launched from — the case that bit us, where a copy left over from `build/` kept
+    /// running alongside the one in `/Applications`. `forceTerminate` because the other
+    /// instance is a background agent with nothing to save.
+    private static func terminateOtherInstances() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let others = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+
+        guard !others.isEmpty else { return }
+        Log.app.info("Terminating \(others.count) other instance(s)")
+        for app in others { app.forceTerminate() }
     }
 
     // MARK: - Menu
