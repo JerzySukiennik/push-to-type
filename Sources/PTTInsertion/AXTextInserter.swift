@@ -38,13 +38,14 @@ public final class AXTextInserter: TextInserting {
         }
         AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
 
-        guard isTextElement(focused) else {
-            Log.insertion.debug("Focused element is not a text area")
-            return false
-        }
-
         // `AXSelectedText` is the only attribute that inserts *at the caret*. Writing
         // `AXValue` would replace the entire field's contents.
+        //
+        // Settability is the whole test. An earlier version also required the element's
+        // role to be one of a handful of known text roles, which turned out to reject more
+        // than it protected: web views, cross-platform toolkits and search fields all
+        // report roles that are not on any sensible list, while a read-only element
+        // answers this probe with `false` anyway.
         var settable: DarwinBoolean = false
         let settableStatus = AXUIElementIsAttributeSettable(
             focused,
@@ -52,7 +53,9 @@ public final class AXTextInserter: TextInserting {
             &settable
         )
         guard settableStatus == .success, settable.boolValue else {
-            Log.insertion.debug("AXSelectedText is not settable here")
+            Log.insertion.debug(
+                "AXSelectedText not settable on \(self.role(of: focused) ?? "unknown", privacy: .public)"
+            )
             return false
         }
 
@@ -87,21 +90,9 @@ public final class AXTextInserter: TextInserting {
         return value as? String
     }
 
-    /// Accepts the roles that behave like editable text.
-    ///
-    /// Checking the role first avoids writing into something that merely happens to expose
-    /// a selected-text attribute, such as a read-only web view.
-    private func isTextElement(_ element: AXUIElement) -> Bool {
-        guard let role = copyString(from: element, attribute: kAXRoleAttribute) else {
-            return false
-        }
-        switch role {
-        case kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, kAXSearchFieldSubrole:
-            return true
-        default:
-            // Web content reports AXTextArea inside AXWebArea in some browsers and a bare
-            // AXGroup in others; the settability probe that follows is the real gate.
-            return role == "AXTextField" || role == "AXTextArea"
-        }
+    /// The element's Accessibility role, for the log. Knowing which role an app reports is
+    /// the only way to find out why a particular app falls back to the clipboard.
+    private func role(of element: AXUIElement) -> String? {
+        copyString(from: element, attribute: kAXRoleAttribute)
     }
 }

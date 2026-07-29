@@ -94,9 +94,16 @@ final class DictationController {
         }
     }
 
-    /// Abandons the current dictation without inserting anything.
+    /// Abandons the dictation currently being *recorded*, inserting nothing.
+    ///
+    /// Deliberately does nothing once the key has been released. A modifier-only shortcut
+    /// reports a cancelled hold whenever ⌃⌥ turns out to be the start of ⌃⌥⌘F — and that
+    /// hold is not necessarily the one that started the dictation still finishing in the
+    /// background. Without this guard, reaching for an ordinary shortcut kills the
+    /// transcription of whatever was said a moment earlier, which is exactly what the log
+    /// showed as `whisper_full_with_state: failed to encode`.
     func cancelDictation() {
-        guard let session else { return }
+        guard let session, !session.isFinishing else { return }
         self.session = nil
 
         session.work?.cancel()
@@ -107,6 +114,16 @@ final class DictationController {
 
         phase = .idle
         hud.hide()
+    }
+
+    /// Tears down whatever is in flight, at quit.
+    func shutDown() {
+        guard let session else { return }
+        self.session = nil
+        session.work?.cancel()
+        session.finish?.cancel()
+        session.chunks.finish()
+        Task { [recorder] in await recorder.abort() }
     }
 
     // MARK: - Capture
@@ -196,11 +213,15 @@ final class DictationController {
 
     /// Stops the microphone, resolves the transcript and inserts it.
     private func finishCapture(_ session: Session) async {
-        defer { if self.session === session { self.session = nil } }
-
         let samples = await recorder.stop()
         session.chunks.finish()
         await session.consumer?.value  // drains whatever is still buffered
+
+        // The slot is freed as soon as the microphone is, not when the transcript is
+        // ready. Push-to-talk is used in bursts: making the user wait out the previous
+        // utterance's inference before they can start the next one is a stutter they did
+        // not ask for, and the two dictations share nothing but the recorder.
+        if self.session === session { self.session = nil }
 
         logCapture(samples)
 
@@ -285,10 +306,12 @@ final class DictationController {
         let pttError = (error as? PTTError)
             ?? .transcriptionFailed(reason: error.localizedDescription)
 
-        await recorder.abort()
+        if self.session === session {
+            await recorder.abort()
+            self.session = nil
+        }
         session.chunks.finish()
         await session.transcriber?.cancel()
-        if self.session === session { self.session = nil }
 
         Log.app.error("Dictation failed: \(pttError.message, privacy: .public)")
 

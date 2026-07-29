@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkeyMonitor.unregister()
-        controller.cancelDictation()
+        controller.shutDown()
     }
 
     /// Clicking the app in Finder while it is already running opens Settings rather than
