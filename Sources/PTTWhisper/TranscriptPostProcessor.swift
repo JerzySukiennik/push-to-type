@@ -28,6 +28,19 @@ public struct TranscriptPostProcessor: Sendable {
 
     private static let whitespaceRuns = try! NSRegularExpression(pattern: #"[ \t]{2,}"#)
 
+    /// Two or more dots. whisper writes these when the speaker hesitates, and a spoken
+    /// pause routinely comes back as `......` — faithful to the audio, wrong for a
+    /// sentence someone is about to send.
+    private static let dotRuns = try! NSRegularExpression(pattern: #"\.{2,}"#)
+
+    /// A space that drifted in front of its punctuation, and repeated commas.
+    private static let spaceBeforePunctuation = try! NSRegularExpression(pattern: #"\s+([,.!?;:…])"#)
+    private static let commaRuns = try! NSRegularExpression(pattern: #"(,\s*){2,}"#)
+
+    /// Hesitation left dangling at the end: the key was released during a pause, so the
+    /// trailing ellipsis is an artefact of stopping, not something the speaker meant.
+    private static let trailingHesitation = try! NSRegularExpression(pattern: #"[\s,…]+$"#)
+
     /// Applies the full clean-up chain. Returns an empty string when nothing survives.
     public func process(_ raw: String) -> String {
         var text = raw
@@ -48,6 +61,14 @@ public struct TranscriptPostProcessor: Sendable {
             withTemplate: " "
         )
 
+        // Hesitation clean-up, in order: long dot runs become one ellipsis, duplicated
+        // commas collapse, punctuation loses the space that drifted in front of it, and
+        // anything left dangling at the very end goes.
+        text = Self.replace(Self.dotRuns, in: text, with: "…")
+        text = Self.replace(Self.commaRuns, in: text, with: ", ")
+        text = Self.replace(Self.spaceBeforePunctuation, in: text, with: "$1")
+        text = Self.replace(Self.trailingHesitation, in: text, with: "")
+
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
 
@@ -63,6 +84,18 @@ public struct TranscriptPostProcessor: Sendable {
         }
 
         return text
+    }
+
+    private static func replace(
+        _ expression: NSRegularExpression,
+        in text: String,
+        with template: String
+    ) -> String {
+        expression.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: template
+        )
     }
 
     /// Joins streamed chunks. Chunks arrive already trimmed, so a single space is the

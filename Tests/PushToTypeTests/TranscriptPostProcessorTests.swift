@@ -43,6 +43,40 @@ struct TranscriptPostProcessorTests {
         #expect(processor.process("École is fine") == "École is fine")
     }
 
+    @Test("Hesitation dots become one ellipsis")
+    func normalisesHesitation() {
+        let processor = TranscriptPostProcessor(
+            capitalizeFirstLetter: false,
+            appendTrailingSpace: false
+        )
+        #expect(processor.process("GSP, Gzowo...... i tak dalej") == "GSP, Gzowo… i tak dalej")
+        #expect(processor.process("no.. właśnie") == "no… właśnie")
+        // A single full stop is punctuation, not hesitation.
+        #expect(processor.process("Koniec zdania. Nowe") == "Koniec zdania. Nowe")
+    }
+
+    @Test("Trailing hesitation is dropped")
+    func dropsTrailingHesitation() {
+        let processor = TranscriptPostProcessor(
+            capitalizeFirstLetter: false,
+            appendTrailingSpace: false
+        )
+        // Releasing the key during a pause should not leave the pause in the text.
+        #expect(processor.process("i jak się zastanawiam......") == "i jak się zastanawiam")
+        #expect(processor.process("coś tam,") == "coś tam")
+        #expect(processor.process("zdanie.") == "zdanie.", "a real full stop survives")
+    }
+
+    @Test("Punctuation loses the space in front of it")
+    func tightensPunctuation() {
+        let processor = TranscriptPostProcessor(
+            capitalizeFirstLetter: false,
+            appendTrailingSpace: false
+        )
+        #expect(processor.process("tak , owszem ; no") == "tak, owszem; no")
+        #expect(processor.process("raz, , dwa") == "raz, dwa")
+    }
+
     @Test("Chunk joining keeps punctuation tight")
     func joinsChunks() {
         #expect(TranscriptPostProcessor.join(["Hello", "world"]) == "Hello world")

@@ -68,12 +68,22 @@ public enum VoiceActivity {
     /// `true` when the last `seconds` of `samples` are quiet — i.e. the speaker has
     /// paused and the buffer can be cut here without slicing through a word.
     ///
-    /// Scans backwards in short windows and stops at the first one that is not silent, so
+    /// - Parameter threshold: what counts as quiet *here*. This is deliberately not
+    ///   ``silenceThreshold``, because the two questions want opposite biases. "Was
+    ///   anything recorded?" should err towards yes, so its threshold sits near the noise
+    ///   floor. "Has the speaker paused?" compares against the speech in this very
+    ///   utterance: room tone in a quiet study and room tone next to a fan differ by more
+    ///   than the gap between silence and speech, so an absolute constant finds pauses in
+    ///   one room and none at all in the other. Callers pass a level derived from how loud
+    ///   this speaker actually is — see ``pauseThreshold(forSpeechLevel:)``.
+    ///
+    /// Scans backwards in short windows and stops at the first one that is not quiet, so
     /// the cost is proportional to the silence examined, not to the length of the buffer.
     public static func endsWithSilence(
         _ samples: [Float],
         sampleRate: Double,
-        seconds: Double
+        seconds: Double,
+        threshold: Float = silenceThreshold
     ) -> Bool {
         let required = Int(sampleRate * seconds)
         guard required > 0, samples.count > required else { return false }
@@ -82,10 +92,20 @@ public enum VoiceActivity {
         var cursor = samples.endIndex
         while cursor > samples.startIndex {
             let start = max(samples.startIndex, cursor - window)
-            if rms(samples[start..<cursor]) >= silenceThreshold { break }
+            if rms(samples[start..<cursor]) >= threshold { break }
             if samples.endIndex - start >= required { return true }
             cursor = start
         }
         return false
+    }
+
+    /// The level below which this speaker counts as having paused.
+    ///
+    /// A twelfth of their own speech level — about −22 dB relative — which is far below
+    /// any vowel and comfortably above the room tone that sits underneath it. Floored at
+    /// ``silenceThreshold`` so a near-silent recording cannot drive the threshold to zero
+    /// and declare the whole thing a pause.
+    public static func pauseThreshold(forSpeechLevel level: Float) -> Float {
+        max(silenceThreshold, level * 0.08)
     }
 }

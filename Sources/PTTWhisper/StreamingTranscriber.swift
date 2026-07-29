@@ -62,6 +62,10 @@ public actor StreamingTranscriber {
     /// `true` once `finish()` or `cancel()` has run, to reject late `append` calls.
     private var isClosed = false
 
+    /// Loudest 100 ms the speaker has produced during this utterance, used to decide what
+    /// counts as a pause *for them, in this room*.
+    private var speechLevel: Float = 0
+
     public init(
         engine: WhisperEngine,
         language: Language,
@@ -80,6 +84,7 @@ public actor StreamingTranscriber {
     /// Feeds newly captured audio. Cheap: it appends and, at most, starts one chunk task.
     public func append(_ samples: [Float]) {
         guard !isClosed else { return }
+        speechLevel = max(speechLevel, VoiceActivity.rms(samples[...]))
         pending.append(contentsOf: samples)
         commitIfReady()
     }
@@ -139,7 +144,8 @@ public actor StreamingTranscriber {
         guard VoiceActivity.endsWithSilence(
             pending,
             sampleRate: sampleRate,
-            seconds: configuration.silenceSeconds
+            seconds: configuration.silenceSeconds,
+            threshold: VoiceActivity.pauseThreshold(forSpeechLevel: speechLevel)
         ) else { return }
 
         // The trailing silence stays inside the committed chunk: whisper reads it as an
