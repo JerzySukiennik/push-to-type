@@ -33,7 +33,10 @@ public final class AXTextInserter: TextInserting {
 
         guard let focused = copyElement(from: systemWide, attribute: kAXFocusedUIElementAttribute)
         else {
-            Log.insertion.debug("No focused element exposed to Accessibility")
+            // Logged at info, not debug: falling back to the clipboard is visible to the
+            // user as a flicker, and `os_log` does not persist debug messages, so a
+            // debug-level reason for a user-visible behaviour cannot be read back later.
+            Log.insertion.info("Falling back to the clipboard: no focused element exposed")
             return false
         }
         AXUIElementSetMessagingTimeout(focused, Self.messagingTimeout)
@@ -53,8 +56,11 @@ public final class AXTextInserter: TextInserting {
             &settable
         )
         guard settableStatus == .success, settable.boolValue else {
-            Log.insertion.debug(
-                "AXSelectedText not settable on \(self.role(of: focused) ?? "unknown", privacy: .public)"
+            Log.insertion.info(
+                """
+                Falling back to the clipboard: AXSelectedText not settable on \
+                \(self.role(of: focused) ?? "an element with no role", privacy: .public)
+                """
             )
             return false
         }
@@ -65,7 +71,9 @@ public final class AXTextInserter: TextInserting {
             text as CFTypeRef
         )
         guard status == .success else {
-            Log.insertion.debug("AXSetAttributeValue failed with \(status.rawValue)")
+            Log.insertion.info(
+                "Falling back to the clipboard: AXSetAttributeValue returned \(status.rawValue)"
+            )
             return false
         }
 
