@@ -44,6 +44,17 @@ public final class ModifierHotkeyMonitor: HotkeyMonitoring {
     /// to a bigger chord, and far shorter than anyone can hold a key and start speaking.
     public static let minimumHold: TimeInterval = 0.22
 
+    /// How long the modifiers must be held *alone* before recording begins.
+    ///
+    /// A modifier-only shortcut is a prefix of every key combination that shares its
+    /// modifiers: holding ⌃⌥ is the first moment of pressing ⌃⌥P. Starting to record the
+    /// instant ⌃⌥ goes down means a race with the very key that was about to make it a
+    /// different shortcut. Waiting this long first lets the letter arrive, so ⌃⌥P is
+    /// recognised as ⌃⌥P and raw never touches the microphone. The cost is that raw
+    /// dictation's first ~180 ms is not captured — shorter than the pause anyone takes
+    /// between pressing a key and speaking.
+    public static let armingDelay: TimeInterval = 0.18
+
     /// All modifiers the monitor compares against; anything else (caps lock, function,
     /// numeric pad) is noise for this purpose.
     private static let tracked: NSEvent.ModifierFlags = [.command, .shift, .option, .control]
@@ -53,6 +64,14 @@ public final class ModifierHotkeyMonitor: HotkeyMonitoring {
 
     /// When the modifiers went down, or `nil` when they are not held.
     private var engagedAt: Date?
+
+    /// `true` once the arming delay has elapsed and recording has actually begun. Between
+    /// engaging and this becoming true, the hold can still turn out to be a larger shortcut.
+    private var isArmed = false
+
+    /// Fires after ``armingDelay`` to arm the hold; cancelled if a key or a modifier change
+    /// arrives first.
+    private var armingTask: Task<Void, Never>?
 
     public init() {}
 
@@ -108,7 +127,10 @@ public final class ModifierHotkeyMonitor: HotkeyMonitoring {
         }
         flagsMonitors = []
         keyMonitors = []
+        armingTask?.cancel()
+        armingTask = nil
         engagedAt = nil
+        isArmed = false
         binding = nil
     }
 
@@ -137,17 +159,42 @@ public final class ModifierHotkeyMonitor: HotkeyMonitoring {
 
     private func engage() {
         engagedAt = Date()
+        isArmed = false
         installKeyGuard()
+
+        // Do not start recording yet: wait out the arming delay so a letter completing a
+        // larger shortcut has time to arrive. `onPress` fires only if the hold survives.
+        armingTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.armingDelay))
+            guard !Task.isCancelled else { return }
+            self?.arm()
+        }
+    }
+
+    private func arm() {
+        guard engagedAt != nil, !isArmed else { return }
+        isArmed = true
         onPress?()
     }
 
-    /// Ends the hold, delivering or discarding depending on `cancelled` and on how long it
-    /// lasted.
+    /// Ends the hold, delivering or discarding depending on `cancelled`, on how long it
+    /// lasted, and on whether it ever armed.
     private func finish(cancelled: Bool, reason: String) {
         guard let engagedAt else { return }
         let held = Date().timeIntervalSince(engagedAt)
+        let wasArmed = isArmed
         self.engagedAt = nil
+        isArmed = false
+        armingTask?.cancel()
+        armingTask = nil
         removeKeyGuard()
+
+        // Never armed: recording never started, so there is nothing to deliver or cancel —
+        // this is the ⌃⌥P case, where the letter arrived during the arming delay.
+        guard wasArmed else {
+            Log.hotkey.debug("Hold released before arming (\(reason, privacy: .public))")
+            return
+        }
 
         if cancelled || held < Self.minimumHold {
             Log.hotkey.debug("Hold discarded after \(held, format: .fixed(precision: 3)) s (\(reason, privacy: .public))")

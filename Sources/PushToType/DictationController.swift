@@ -79,9 +79,18 @@ final class DictationController {
     /// it into the Prompt mode's shortcut — the raw hold is abandoned and Prompt takes over,
     /// regardless of which of the two events the system delivers first.
     func hotkeyPressed(mode: DictationMode) {
+        var preempting = false
         if let current = session {
             if current.mode.id == mode.id { return }  // same shortcut twice
-            if !current.isFinishing { discard(current) }
+            if !current.isFinishing {
+                // Pre-empt, but only cancel the previous session's tasks here — not the
+                // recorder. The recorder is shared, and tearing it down on a detached task
+                // would race the new session's start(): the new one would find the mic
+                // still busy, bail out, and then the old teardown would stop the mic it was
+                // about to use. Instead the new capture awaits the teardown first, below.
+                discardTasks(current)
+                preempting = true
+            }
         }
 
         let configuration = settings.snapshot
@@ -89,12 +98,17 @@ final class DictationController {
 
         let session = Session(configuration: configuration, mode: mode)
         self.session = session
+        Log.app.info("Started mode \(mode.name, privacy: .public)\(preempting ? " (pre-empting)" : "")")
 
         phase = .listening(level: 0)
         hud.show(phase)
 
         session.work = Task { [weak self] in
-            await self?.runCapture(session)
+            guard let self else { return }
+            // Serialise on the recorder: stop the pre-empted recording before starting the
+            // new one, in the same task, so there is no window where both touch it.
+            if preempting { await self.recorder.abort() }
+            await self.runCapture(session)
         }
     }
 
@@ -132,18 +146,23 @@ final class DictationController {
     /// from killing an unrelated, in-flight dictation.
     func cancelDictation(modeID: String) {
         guard let session, session.mode.id == modeID, !session.isFinishing else { return }
-        discard(session)
+        discardTasks(session)
+        // A genuine cancel does stop the mic — nothing is taking it over.
+        Task { [recorder] in await recorder.abort() }
         phase = .idle
         hud.hide()
     }
 
-    /// Tears down a session's work without touching `phase` or the HUD.
-    private func discard(_ session: Session) {
+    /// Cancels a session's tasks and streams, but does *not* stop the recorder.
+    ///
+    /// Split out from stopping the mic because pre-emption needs the tasks cancelled
+    /// without the recorder touched — the incoming session owns the mic next and stops it
+    /// itself, in order. A plain cancel calls this and then stops the mic separately.
+    private func discardTasks(_ session: Session) {
         if self.session === session { self.session = nil }
         session.work?.cancel()
         session.finish?.cancel()
         session.chunks.finish()
-        Task { [recorder] in await recorder.abort() }
         Task { [transcriber = session.transcriber] in await transcriber?.cancel() }
     }
 
