@@ -49,12 +49,25 @@ fi
 
 # 4. Signature.
 #
-# TCC (microphone, Accessibility) identifies an app by its code signature. An ad-hoc
-# signature is stable as long as the binary does not change — which means a rebuild asks
-# for Accessibility again. That is a property of unsigned local builds, not a bug; sign
-# with a Developer ID certificate to make the grants stick across builds.
-echo "==> Signing (ad-hoc)"
-codesign --force --sign - \
+# TCC identifies an app by its code signature. An ad-hoc signature is a hash of the binary,
+# so every rebuild is a different app as far as Microphone and Accessibility are concerned,
+# and every permission has to be granted again.
+#
+# If the local self-signed identity exists (Scripts/make-signing-identity.sh), use it: its
+# designated requirement is the bundle ID plus a fixed certificate hash, which does not
+# change when the code does. Otherwise fall back to ad-hoc and say what that costs.
+IDENTITY="${PUSHTOTYPE_SIGN_IDENTITY:-PushToType Local Signing}"
+
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+    echo "==> Signing with '$IDENTITY'"
+    SIGN_WITH="$IDENTITY"
+else
+    echo "==> Signing (ad-hoc) — permissions will reset on every rebuild."
+    echo "    Run ./Scripts/make-signing-identity.sh once to stop that."
+    SIGN_WITH="-"
+fi
+
+codesign --force --sign "$SIGN_WITH" \
     --entitlements "$ROOT/Resources/PushToType.entitlements" \
     --timestamp=none \
     "$APP" 2>/dev/null

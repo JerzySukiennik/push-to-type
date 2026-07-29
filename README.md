@@ -57,9 +57,28 @@ two instances would both grab the hotkey and only one would win.
 4. The **base.en** model (141 MB) downloads on first use; the HUD shows the progress and
    recording continues while it does.
 
-Ad-hoc signatures change every time the binary is rebuilt, so macOS asks for Accessibility
-again after each rebuild. That is how TCC identifies apps, not a bug — signing with a
-Developer ID certificate makes the grant stick.
+### Permissions that survive a rebuild
+
+macOS identifies an app for Microphone and Accessibility by its **code signature**. An
+ad-hoc signature is a hash of the binary, so every rebuild is a different app as far as the
+system is concerned, and every permission has to be granted again.
+
+```bash
+./Scripts/make-signing-identity.sh
+```
+
+Creates a local self-signed certificate in your login keychain. The designated requirement
+becomes the bundle ID plus a fixed certificate hash, which does not change when the code
+does — so permissions granted once keep working across every rebuild. `build-app.sh` picks
+the identity up automatically and falls back to ad-hoc when it is absent.
+
+Switching to it changes the signature one final time, so both permissions need granting
+once more afterwards. Remove the stale PushToType row from the Accessibility list with the
+**−** button before adding the new build, or macOS will keep matching the old entry.
+
+The certificate is trusted by nothing and notarised by nobody: it makes local development
+bearable and is not a substitute for a Developer ID certificate. Remove it with
+`security delete-certificate -c "PushToType Local Signing"`.
 
 ## Using it
 
