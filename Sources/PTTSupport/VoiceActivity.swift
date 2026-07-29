@@ -11,9 +11,12 @@ public enum VoiceActivity {
 
     /// Amplitude below which a frame counts as silence.
     ///
-    /// −45 dBFS: quiet enough to ignore fan noise and a laptop keyboard, loud enough that
-    /// a whisper (the human kind) still registers.
-    public static let silenceThreshold: Float = 0.0056
+    /// −52 dBFS. The gate exists for one purpose: stopping whisper from inventing "Thank
+    /// you." out of an empty room. It is not a quality filter, so it errs low — a built-in
+    /// laptop microphone at arm's length produces surprisingly little signal, and rejecting
+    /// real speech is a far worse failure than passing room tone to a model that has its
+    /// own no-speech detection.
+    public static let silenceThreshold: Float = 0.0025
 
     /// Root-mean-square amplitude of `samples`.
     public static func rms(_ samples: UnsafeBufferPointer<Float>) -> Float {

@@ -2,6 +2,22 @@ import Foundation
 import Observation
 import PTTSupport
 
+extension UserDefaults {
+    /// The application's preference domain, wherever the code reading it happens to live.
+    ///
+    /// Inside the app bundle this is simply `.standard`. A bare executable — `ptt-doctor` —
+    /// has no bundle identifier, so its `.standard` is a *different* domain, and a
+    /// diagnostics tool that reports settings the app is not using is worse than one that
+    /// reports none at all. Naming the domain explicitly makes both read the same file.
+    /// Computed rather than stored: `UserDefaults` is not `Sendable`, and it already
+    /// returns the same cached instance for a given suite, so there is nothing to gain
+    /// from holding one here.
+    public static var appDomain: UserDefaults {
+        guard Bundle.main.bundleIdentifier == nil else { return .standard }
+        return UserDefaults(suiteName: AppPaths.bundleIdentifier) ?? .standard
+    }
+}
+
 /// Immutable view of the settings, safe to hand to actors.
 ///
 /// Background work (capture, inference, insertion) reads a snapshot taken at the moment a
@@ -33,7 +49,7 @@ public final class SettingsStore {
     private let defaults: UserDefaults
 
     /// - Parameter defaults: injected so tests can run against an isolated suite.
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .appDomain) {
         self.defaults = defaults
         registerDefaults()
     }
@@ -83,7 +99,9 @@ public final class SettingsStore {
         }
         set {
             guard newValue.isValid else {
-                Log.settings.error("Refusing to store modifier-less hotkey \(newValue.keyCode)")
+                Log.settings.error(
+                    "Refusing to store unusable hotkey \(newValue.displayString, privacy: .public)"
+                )
                 return
             }
             guard let data = try? JSONEncoder().encode(newValue) else { return }

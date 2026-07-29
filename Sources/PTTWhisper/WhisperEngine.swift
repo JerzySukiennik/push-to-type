@@ -223,7 +223,12 @@ public actor WhisperEngine {
         params.print_timestamps = false
         params.suppress_blank = true
         params.suppress_nst = true
-        params.detect_language = language.isAutomatic
+        // Deliberately always false, despite the name reading like the switch for
+        // automatic language selection. In whisper.cpp, `detect_language` means "detect
+        // the language and return" — `whisper_full` exits with zero segments as soon as it
+        // has an answer. Passing "auto" as the language is what actually enables detection
+        // *and* transcription; this flag is only for callers that want the language alone.
+        params.detect_language = false
         // Each dictation is independent: carrying whisper's internal text context between
         // them makes it echo the previous utterance when the new one is short.
         params.no_context = true

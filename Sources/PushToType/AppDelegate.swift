@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let models = ModelManager()
     private let inserter = TextInsertionService()
     private let hud = HUDController()
-    private let hotkeyMonitor: any HotkeyMonitoring = CarbonHotkeyMonitor()
+    private let hotkeyMonitor: any HotkeyMonitoring = HotkeyMonitor()
 
     private var controller: DictationController!
     private var menuBar: MenuBarController!
@@ -90,7 +90,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyMonitor.onRelease = { [weak self] in
             self?.controller.hotkeyReleased()
         }
+        hotkeyMonitor.onCancel = { [weak self] in
+            // The hold was a shortcut or a brush of the hand, not speech.
+            self?.controller.cancelDictation()
+        }
         register(settings.hotkey)
+
+        // A modifier-only shortcut is invisible until the app is trusted for
+        // Accessibility, and macOS gives no notification when that changes. Re-registering
+        // on activation is the event-driven way to pick the grant up: the user has just
+        // come back from System Settings, which is exactly when it matters.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.settings.hotkey.isModifierOnly else { return }
+                self.register(self.settings.hotkey)
+            }
+        }
     }
 
     /// Registers a binding, reporting failure through the HUD instead of a modal.

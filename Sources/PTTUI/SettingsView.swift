@@ -24,9 +24,10 @@ struct SettingsView: View {
         Form {
             Section("Shortcut") {
                 hotkeyRow
-                Text("Hold the shortcut, speak, then release. While it is registered, other apps do not receive it.")
+                Text(shortcutExplanation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Speech") {
@@ -94,17 +95,36 @@ struct SettingsView: View {
 
     // MARK: - Rows
 
+    /// The two shapes of shortcut behave differently enough towards other apps that the
+    /// explanation has to follow the current choice rather than describe one of them.
+    private var shortcutExplanation: String {
+        if model.settings.hotkey.isModifierOnly {
+            return """
+                Hold the modifiers, speak, then release. Other apps still receive them \
+                normally — PushToType only watches. Pressing any key during the hold \
+                cancels, so ordinary shortcuts still work.
+                """
+        }
+        return """
+            Hold the shortcut, speak, then release. While it is registered, no other app \
+            receives this combination.
+            """
+    }
+
     private var hotkeyRow: some View {
         LabeledContent("Shortcut") {
             Button {
                 toggleRecording()
             } label: {
-                Text(isRecordingHotkey ? "Press a combination…" : model.settings.hotkey.displayString)
+                Text(isRecordingHotkey ? "Press or hold…" : model.settings.hotkey.displayString)
                     .frame(minWidth: 120)
                     .monospaced()
             }
             .buttonStyle(.bordered)
-            .help("Click, then press the combination you want. Escape cancels.")
+            .help(
+                "Click, then either press a combination, or hold two modifiers and let go. "
+                    + "Escape cancels."
+            )
         }
     }
 

@@ -1,6 +1,13 @@
 import Foundation
 
-/// A global key combination, stored in the units Carbon's `RegisterEventHotKey` expects.
+/// A global shortcut: either modifiers plus a key, or modifiers held on their own.
+///
+/// The two shapes exist because push-to-talk wants something different from a normal
+/// shortcut. A key combination like ⌘T is *exclusive* — while it is registered, no other
+/// app receives it. Modifiers held alone (⌃⌥, the push-to-talk convention) take nothing
+/// away from anyone, because they are observed passively rather than claimed. They are
+/// watched by different mechanisms, which is why ``keyCode`` is optional rather than the
+/// two being separate types: everything above this layer treats them identically.
 ///
 /// The type lives in `PTTSettings` rather than `PTTHotkeys` because both the settings UI
 /// and the hotkey monitor need it, and neither should depend on the other. It is a plain
@@ -8,22 +15,34 @@ import Foundation
 public struct HotkeyBinding: Codable, Equatable, Sendable {
 
     /// Virtual key code (`kVK_*`), independent of the active keyboard layout.
-    public var keyCode: UInt32
+    /// `nil` means the binding is the modifiers alone.
+    public var keyCode: UInt32?
 
     /// Carbon modifier mask (`cmdKey`, `optionKey`, …).
     public var modifiers: Modifiers
 
-    public init(keyCode: UInt32, modifiers: Modifiers) {
+    public init(keyCode: UInt32?, modifiers: Modifiers) {
         self.keyCode = keyCode
         self.modifiers = modifiers
     }
 
-    /// ⌘T — the documented default.
-    public static let `default` = HotkeyBinding(keyCode: KeyCode.t, modifiers: .command)
+    /// ⌃⌥ held on its own — the default.
+    ///
+    /// Chosen over a key combination because a push-to-talk key is held for seconds at a
+    /// time and should not be taken away from every other app for the privilege.
+    public static let `default` = HotkeyBinding(keyCode: nil, modifiers: [.control, .option])
 
-    /// A binding is only usable globally if it carries at least one modifier; otherwise
-    /// it would swallow a bare key press in every app on the system.
-    public var isValid: Bool { !modifiers.isEmpty }
+    /// `true` when the shortcut is modifiers with no key.
+    public var isModifierOnly: Bool { keyCode == nil }
+
+    /// Whether this binding can be used globally.
+    ///
+    /// With a key, one modifier is enough — a bare key would otherwise be swallowed
+    /// system-wide. Without a key, **two** are required: a single modifier is part of
+    /// almost every shortcut a user presses, so ⌥ alone would start a dictation constantly.
+    public var isValid: Bool {
+        isModifierOnly ? modifiers.count >= 2 : !modifiers.isEmpty
+    }
 
     // MARK: Modifiers
 
@@ -38,8 +57,12 @@ public struct HotkeyBinding: Codable, Equatable, Sendable {
         public static let option = Modifiers(rawValue: 0x0800)   // optionKey
         public static let control = Modifiers(rawValue: 0x1000)  // controlKey
 
+        /// How many modifiers are set. Each flag occupies its own bit, so a population
+        /// count is exactly the answer.
+        public var count: Int { rawValue.nonzeroBitCount }
+
         /// Symbols in the order macOS uses in menus: ⌃⌥⇧⌘.
-        var symbols: String {
+        public var symbols: String {
             var out = ""
             if contains(.control) { out += "⌃" }
             if contains(.option) { out += "⌥" }
@@ -51,9 +74,10 @@ public struct HotkeyBinding: Codable, Equatable, Sendable {
 
     // MARK: Display
 
-    /// Menu-style representation, e.g. `⌘T` or `⌃⌥Space`.
+    /// Menu-style representation, e.g. `⌘T`, `⌃⌥Space`, or just `⌃⌥`.
     public var displayString: String {
-        modifiers.symbols + KeyCode.displayName(for: keyCode)
+        guard let keyCode else { return modifiers.symbols }
+        return modifiers.symbols + KeyCode.displayName(for: keyCode)
     }
 }
 

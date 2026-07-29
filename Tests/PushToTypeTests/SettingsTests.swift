@@ -15,12 +15,13 @@ struct SettingsTests {
         return SettingsStore(defaults: UserDefaults(suiteName: suite)!)
     }
 
-    @Test("Defaults are ⌘T, base.en, English")
+    @Test("Defaults are ⌃⌥ held alone, base.en, English")
     @MainActor
     func hasSensibleDefaults() {
         let store = makeStore()
         #expect(store.hotkey == .default)
-        #expect(store.hotkey.displayString == "⌘T")
+        #expect(store.hotkey.displayString == "⌃⌥")
+        #expect(store.hotkey.isModifierOnly)
         #expect(store.model == .baseEn)
         #expect(store.language == .english)
         #expect(store.streamingEnabled)
@@ -34,14 +35,39 @@ struct SettingsTests {
         #expect(store.hotkey == .default, "the previous binding must survive")
     }
 
-    @Test("Hotkeys survive a round trip through defaults")
+    @Test("A single modifier held alone is rejected")
     @MainActor
-    func persistsHotkey() {
+    func rejectsOneModifierAlone() {
         let store = makeStore()
+        // ⌥ on its own is part of ordinary typing; accepting it would start a dictation
+        // several times a minute.
+        store.hotkey = HotkeyBinding(keyCode: nil, modifiers: .option)
+        #expect(store.hotkey == .default)
+
+        #expect(HotkeyBinding(keyCode: nil, modifiers: [.control, .option]).isValid)
+        #expect(!HotkeyBinding(keyCode: nil, modifiers: .control).isValid)
+    }
+
+    @Test("Both shapes survive a round trip through defaults")
+    @MainActor
+    func persistsBothShapes() {
+        let store = makeStore()
+
+        let combination = HotkeyBinding(keyCode: KeyCode.space, modifiers: [.control, .option])
+        store.hotkey = combination
+        #expect(store.hotkey == combination)
+        #expect(!store.hotkey.isModifierOnly)
+
+        let modifiersOnly = HotkeyBinding(keyCode: nil, modifiers: [.command, .shift])
+        store.hotkey = modifiersOnly
+        #expect(store.hotkey == modifiersOnly)
+        #expect(store.hotkey.displayString == "⇧⌘")
+    }
+
+    @Test("A key combination is displayed the way a menu would show it")
+    func displaysCombination() {
         let binding = HotkeyBinding(keyCode: KeyCode.space, modifiers: [.control, .option])
-        store.hotkey = binding
-        #expect(store.hotkey == binding)
-        #expect(store.hotkey.displayString == "⌃⌥Space")
+        #expect(binding.displayString == "⌃⌥Space")
     }
 
     @Test("Choosing an English-only model pins the language to English")

@@ -1,13 +1,13 @@
 # PushToType
 
-Hold ⌘T, speak, let go — the text lands in whatever field you were typing into.
+Hold ⌃⌥, speak, let go — the text lands in whatever field you were typing into.
 Like push-to-talk, except it outputs words instead of audio.
 
 Everything runs on your Mac. No account, no cloud, no subscription, no telemetry.
 Speech never leaves the machine.
 
 ```
-    ⌘T ↓            speak              ⌘T ↑           text appears
+    ⌃⌥ ↓            speak              ⌃⌥ ↑           text appears
   ───────────────────────────────────────────────────────────────▶
     record       transcribe as you go    finish        insert
 ```
@@ -51,7 +51,9 @@ two instances would both grab the hotkey and only one would win.
 2. macOS asks for **Microphone** access the first time you dictate.
 3. **Accessibility** access must be granted manually, in
    System Settings › Privacy & Security › Accessibility. The app cannot type into other
-   applications without it.
+   applications without it — and with the default modifier-only shortcut, it cannot even
+   see the shortcut. PushToType re-checks whenever it becomes active, so it starts working
+   as soon as you come back from System Settings.
 4. The **base.en** model (141 MB) downloads on first use; the HUD shows the progress and
    recording continues while it does.
 
@@ -71,9 +73,27 @@ The menu bar item holds Language, Model, Hotkey, Launch at Login, Settings and Q
 
 ### The shortcut
 
-⌘T by default, changeable in Settings. A global hotkey is exclusive: while PushToType holds
-⌘T, apps that use it for "new tab" stop receiving it. If that bothers you, pick something
-the system does not already use — ⌃⌥Space and ⌘⌥D are good candidates.
+**⌃⌥ held on its own** by default. Two shapes are supported, and they behave differently
+towards the rest of the system:
+
+| Shape | Example | Effect on other apps |
+|---|---|---|
+| Modifiers alone | ⌃⌥ | **None.** They are observed, not claimed — every app still sees them |
+| Modifiers + key | ⌘T | Exclusive: no other app receives that combination while PushToType runs |
+
+Modifiers alone is the default because a push-to-talk key is held for seconds at a time,
+and taking ⌘T away from every browser for the privilege is a poor trade.
+
+Holding ⌃⌥ is also how you *begin* pressing ⌃⌥⌘F, so a hold is discarded when the modifier
+set grows, when any ordinary key is pressed during it, or when it lasts under 220 ms.
+Ordinary shortcuts keep working; you will not accidentally dictate into them.
+
+To record a new shortcut in Settings: click the field, then either press a combination, or
+hold two modifiers and let go.
+
+One consequence: a modifier-only shortcut is invisible to the app until Accessibility is
+granted, because that is what `NSEvent`'s global monitors require. A key combination works
+without it — but text insertion still does not.
 
 ### Models
 

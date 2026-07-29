@@ -18,6 +18,9 @@ public final class HotkeyRecorder {
     private nonisolated(unsafe) var monitor: Any?
     private var completion: ((HotkeyBinding?) -> Void)?
 
+    /// The largest modifier set seen during the current hold.
+    private var heldModifiers: HotkeyBinding.Modifiers = []
+
     public init() {}
 
     deinit {
@@ -27,22 +30,36 @@ public final class HotkeyRecorder {
     /// Starts listening.
     ///
     /// - Parameter completion: the captured binding, or `nil` if the user pressed Escape
-    ///   or chose a combination with no modifiers (which would be unusable globally).
+    ///   or chose something unusable as a global shortcut.
+    ///
+    /// Both shapes are recordable. Pressing a key while holding modifiers gives a key
+    /// combination; holding modifiers and letting go without pressing anything gives a
+    /// modifier-only binding. The user does not have to be told which mode they are in —
+    /// they just do the thing they want the shortcut to be.
     public func start(completion: @escaping (HotkeyBinding?) -> Void) {
         stop()
         self.completion = completion
         isRecording = true
+        heldModifiers = []
 
-        // Only the two `Sendable` values the recorder needs are read out of the event, so
-        // the `NSEvent` itself never crosses a concurrency boundary. Every key press is
-        // swallowed while recording — that is the point of a shortcut field.
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        // Only `Sendable` values are read out of each event, so the `NSEvent` itself never
+        // crosses a concurrency boundary. Key presses are swallowed while recording —
+        // that is the point of a shortcut field.
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged]
+        ) { [weak self] event in
+            let type = event.type
             let keyCode = UInt32(event.keyCode)
             let flags = event.modifierFlags
+
             MainActor.assumeIsolated {
-                self?.consume(keyCode: keyCode, flags: flags)
+                if type == .flagsChanged {
+                    self?.modifiersChanged(to: flags)
+                } else {
+                    self?.consume(keyCode: keyCode, flags: flags)
+                }
             }
-            return nil
+            return type == .keyDown ? nil : event
         }
     }
 
@@ -53,10 +70,11 @@ public final class HotkeyRecorder {
             self.monitor = nil
         }
         isRecording = false
+        heldModifiers = []
         completion = nil
     }
 
-    /// Turns a key press into a binding and ends recording.
+    /// Turns a key press into a key-combination binding and ends recording.
     private func consume(keyCode: UInt32, flags: NSEvent.ModifierFlags) {
         guard isRecording else { return }
 
@@ -73,6 +91,35 @@ public final class HotkeyRecorder {
         }
 
         finish(with: HotkeyBinding(keyCode: keyCode, modifiers: modifiers))
+    }
+
+    /// Tracks modifiers so that releasing them — with no key pressed in between — records
+    /// a modifier-only binding.
+    ///
+    /// The high-water mark is what counts: a user pressing ⌃ then ⌥ passes through a
+    /// single-modifier state on the way, and lifting both fingers rarely registers as one
+    /// event either. Recording the largest set seen avoids capturing ⌃ alone.
+    private func modifiersChanged(to flags: NSEvent.ModifierFlags) {
+        guard isRecording else { return }
+        let current = HotkeyBinding.Modifiers(carbonFlags: flags)
+
+        if current.rawValue != 0 {
+            if current.count >= heldModifiers.count {
+                heldModifiers = current
+            }
+            return
+        }
+
+        // Everything is up again.
+        let candidate = heldModifiers
+        heldModifiers = []
+        guard candidate.count >= 2 else {
+            // One modifier on its own fires during ordinary typing; refuse it and wait.
+            if candidate.count == 1 { NSSound.beep() }
+            return
+        }
+
+        finish(with: HotkeyBinding(keyCode: nil, modifiers: candidate))
     }
 
     private func finish(with binding: HotkeyBinding?) {

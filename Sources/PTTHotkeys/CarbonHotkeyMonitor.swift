@@ -22,6 +22,10 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
     public var onPress: (@MainActor () -> Void)?
     public var onRelease: (@MainActor () -> Void)?
 
+    /// Never called: a registered Carbon hot key is unambiguous. It exists to satisfy
+    /// ``HotkeyMonitoring``, whose cancel path only modifier-only bindings can reach.
+    public var onCancel: (@MainActor () -> Void)?
+
     public private(set) var binding: HotkeyBinding?
 
     // Carbon handles. `nonisolated(unsafe)` because `deinit` must release them and runs
@@ -46,7 +50,9 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
     // MARK: - Registration
 
     public func register(_ binding: HotkeyBinding) throws {
-        guard binding.isValid else {
+        // Carbon's hot key table is keyed by virtual key code, so a modifier-only binding
+        // cannot be expressed here at all — ``ModifierHotkeyMonitor`` handles those.
+        guard binding.isValid, !binding.isModifierOnly else {
             throw PTTError.hotkeyRegistrationFailed(status: -1)
         }
 
@@ -112,11 +118,15 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
     }
 
     private func installHotKey(_ binding: HotkeyBinding) throws {
+        guard let keyCode = binding.keyCode else {
+            throw PTTError.hotkeyRegistrationFailed(status: -1)
+        }
+
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.identifier)
         var reference: EventHotKeyRef?
 
         let status = RegisterEventHotKey(
-            binding.keyCode,
+            keyCode,
             binding.modifiers.rawValue,
             hotKeyID,
             GetApplicationEventTarget(),

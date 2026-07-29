@@ -202,6 +202,8 @@ final class DictationController {
         session.chunks.finish()
         await session.consumer?.value  // drains whatever is still buffered
 
+        logCapture(samples)
+
         do {
             guard VoiceActivity.containsSpeech(samples, sampleRate: WhisperEngine.requiredSampleRate)
             else {
@@ -228,6 +230,8 @@ final class DictationController {
                 appendTrailingSpace: session.configuration.appendTrailingSpace
             ).process(raw)
 
+            // The transcript itself is never logged: it is whatever the user just said.
+            Log.app.info("Transcribed \(raw.count) raw characters")
             guard !text.isEmpty else { throw PTTError.emptyTranscript }
 
             try await inserter.insert(
@@ -249,6 +253,31 @@ final class DictationController {
         } catch {
             await fail(session, with: error)
         }
+    }
+
+    /// Records what the microphone actually delivered.
+    ///
+    /// When a dictation comes back empty there are three candidates — nothing was captured,
+    /// something was captured but too quietly to pass the gate, or the audio was fine and
+    /// the model returned nothing — and they need completely different fixes. One line in
+    /// the log tells them apart, without the transcript itself ever being written down.
+    private func logCapture(_ samples: [Float]) {
+        let seconds = Double(samples.count) / WhisperEngine.requiredSampleRate
+        let peak = VoiceActivity.peak(samples[...])
+        let rms = VoiceActivity.rms(samples[...])
+        let passesGate = VoiceActivity.containsSpeech(
+            samples,
+            sampleRate: WhisperEngine.requiredSampleRate
+        )
+
+        Log.app.info(
+            """
+            Captured \(seconds, format: .fixed(precision: 2)) s — \
+            peak \(peak, format: .fixed(precision: 4)), \
+            rms \(rms, format: .fixed(precision: 4)), \
+            gate \(passesGate ? "passed" : "REJECTED", privacy: .public)
+            """
+        )
     }
 
     /// Reports an error through the HUD and returns to idle.

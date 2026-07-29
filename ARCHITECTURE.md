@@ -105,14 +105,36 @@ Zero-dependency leaf module.
   space" preferences.
 
 ### `PTTHotkeys` — Global hotkey
-- `HotkeyMonitoring` protocol (`onPress`/`onRelease` callbacks) — the seam for DI and tests.
+A shortcut here is one of two shapes, and they cannot share a mechanism:
+
+- **Modifiers alone** (⌃⌥, the default) — the push-to-talk convention. Carbon's hot key
+  table is keyed by virtual key code and cannot express "no key", so these are observed
+  through `flagsChanged` events. The observation is **passive**: every other app still
+  receives ⌃⌥ exactly as before. That is the entire argument for the extra implementation.
+- **Modifiers plus a key** (⌘T, ⌃⌥Space) — `RegisterEventHotKey`, which *consumes* the
+  combination system-wide.
+
+Types:
+- `HotkeyMonitoring` protocol (`onPress` / `onRelease` / `onCancel`) — the seam for DI and
+  tests, and the reason nothing above this module branches on the shape of a shortcut.
+- `HotkeyMonitor` — routes a binding to the right implementation and unregisters the other,
+  so switching shapes cannot leave a Carbon hot key silently eating a combination.
 - `CarbonHotkeyMonitor` — `RegisterEventHotKey` + an `EventHandlerUPP` handling both
-  `kEventHotKeyPressed` and `kEventHotKeyReleased`. Chosen over `CGEventTap` deliberately:
-  it needs **no Accessibility permission**, costs nothing when idle, and cannot drop events
-  under load. Re-registration on binding change is atomic (unregister → register → rollback
-  on failure, so a conflicting binding never leaves the app hotkey-less).
-- `HotkeyRecorder` — a local `NSEvent` monitor used *only* while the Settings recorder
-  field is focused, so no global tap ever exists outside that moment.
+  `kEventHotKeyPressed` and `kEventHotKeyReleased`. Chosen over a `CGEventTap` deliberately:
+  no Accessibility permission, nothing in the path of every keystroke on the machine, and
+  no risk of the system disabling a slow tap. Re-registration is atomic (unregister →
+  register → roll back on failure), so a conflicting binding never leaves the app without
+  a shortcut.
+- `ModifierHotkeyMonitor` — global + local `flagsChanged` monitors. Because holding ⌃⌥ is
+  also how one *starts* pressing ⌃⌥⌘F, it cancels rather than delivers when the modifier
+  set grows, when any ordinary key is pressed during the hold, or when the hold is shorter
+  than 220 ms. The key guard is installed only for the duration of a hold. `NSEvent` global
+  monitors are silent until the app is trusted for Accessibility, so a modifier-only
+  binding makes that permission a requirement for the shortcut itself — the app
+  re-registers on activation, which is exactly when the user returns from System Settings.
+- `HotkeyRecorder` — a local `NSEvent` monitor, live *only* while the Settings field is
+  focused. It records either shape from what the user actually does: press a key while
+  holding modifiers, or hold modifiers and let go.
 
 ### `PTTInsertion` — Getting text into the focused field
 - `TextInserting` protocol; `TextInsertionService` owns the strategy chain:
