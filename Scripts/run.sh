@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 #
-# run.sh — build the app, replace any running copy, and launch it.
+# run.sh — build and launch.
 #
-# Quitting the old instance first matters: two copies would both register the global
-# hotkey, and only one of them would ever receive it.
+# Once the app is installed, this updates the installed copy rather than running a second
+# one out of build/. Two bundles with the same identifier is a good way to spend ten
+# minutes wondering why a fix "did nothing": both register the hotkey, only one wins, and
+# it is not necessarily the one just rebuilt.
 #
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+INSTALLED="/Applications/PushToType.app"
+
+if [[ -d "$INSTALLED" ]]; then
+    # Already installed: keep that copy current, and leave the login item alone.
+    exec "$ROOT/Scripts/install.sh" --no-login
+fi
 
 "$ROOT/Scripts/build-app.sh" "$@"
 

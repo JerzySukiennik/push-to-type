@@ -42,8 +42,26 @@ open build/PushToType.app
 `build-app.sh` compiles whisper.cpp into static libraries on the first run (a few minutes),
 builds the Swift package, assembles `build/PushToType.app`, and signs it ad-hoc.
 
-`./Scripts/run.sh` does the same and relaunches the app, quitting any running copy first —
-two instances would both grab the hotkey and only one would win.
+## Install
+
+```bash
+./Scripts/install.sh
+```
+
+Puts the app in `/Applications`, turns on Launch at Login, and starts it. Pass
+`--no-login` to install without the login item.
+
+Launch at Login goes through `SMAppService.mainApp`, which only the app itself can
+register — hence the `--register-login-item` switch the installer calls. Undo it with
+`/Applications/PushToType.app/Contents/MacOS/PushToType --unregister-login-item`, or from
+the menu bar.
+
+Once installed, `./Scripts/run.sh` updates the installed copy instead of launching a second
+one out of `build/`. Two bundles with the same identifier both grab the hotkey and only one
+wins — which is a confusing way to discover that a fix "did nothing".
+
+Permissions survive the move to `/Applications`: TCC matches the code signature, not the
+path — provided you created the signing identity below.
 
 ## First run
 
