@@ -17,6 +17,10 @@ public enum DictationPhase: Sendable, Equatable {
     /// The key is up and inference is finishing.
     case transcribing
 
+    /// The transcript is being rewritten by the model for a refined mode. `mode` is the
+    /// mode's name, so the HUD can say which one.
+    case refining(mode: String)
+
     /// A model file is being fetched. `progress` is 0…1.
     case downloading(model: String, progress: Double)
 
@@ -33,7 +37,7 @@ public enum DictationPhase: Sendable, Equatable {
     /// `true` while the user is expected to keep holding the key.
     public var isActive: Bool {
         switch self {
-        case .listening, .transcribing, .downloading: true
+        case .listening, .transcribing, .downloading, .refining: true
         case .idle, .failed, .inserted, .limitReached: false
         }
     }
@@ -44,6 +48,7 @@ public enum DictationPhase: Sendable, Equatable {
         case .idle: ""
         case .listening: "Listening…"
         case .transcribing: "Transcribing…"
+        case .refining(let mode): "\(mode)…"
         case .downloading(let model, let progress):
             "Downloading \(model) — \(Int(progress * 100))%"
         case .failed(let error): error.title
@@ -58,6 +63,7 @@ public enum DictationPhase: Sendable, Equatable {
         case .idle: ""
         case .listening: "🎤"
         case .transcribing: "⚙️"
+        case .refining: "✨"
         case .downloading: "⬇️"
         case .failed: "⚠️"
         case .inserted: "✓"
@@ -71,6 +77,7 @@ public enum DictationPhase: Sendable, Equatable {
         case .idle, .inserted, .limitReached: "mic"
         case .listening: "mic.fill"
         case .transcribing: "waveform"
+        case .refining: "sparkles"
         case .downloading: "arrow.down.circle"
         case .failed: "exclamationmark.triangle"
         }

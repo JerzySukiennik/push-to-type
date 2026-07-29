@@ -1,6 +1,7 @@
 import Foundation
 import PTTAudio
 import PTTInsertion
+import PTTRefine
 import PTTSettings
 import PTTSupport
 import PTTUI
@@ -30,6 +31,9 @@ final class DictationController {
     private let inserter: TextInsertionService
     private let hud: HUDController
 
+    /// Rewrites the transcript for refined modes; `nil` disables refinement entirely.
+    private let refiner: (any TextRefiner)?
+
     /// Notified on every state change, for the menu bar glyph and header line.
     var onPhaseChange: ((DictationPhase) -> Void)?
 
@@ -51,7 +55,8 @@ final class DictationController {
         engine: WhisperEngine,
         models: ModelManager,
         inserter: TextInsertionService,
-        hud: HUDController
+        hud: HUDController,
+        refiner: (any TextRefiner)? = nil
     ) {
         self.settings = settings
         self.recorder = recorder
@@ -59,21 +64,30 @@ final class DictationController {
         self.models = models
         self.inserter = inserter
         self.hud = hud
+        self.refiner = refiner
     }
 
     // MARK: - Hotkey
 
-    /// The shortcut went down: start recording immediately.
+    /// A mode's shortcut went down: start recording in that mode.
     ///
     /// Recording starts *before* the model is confirmed loaded. Waiting for a cold model
     /// would swallow the first word, and the audio simply queues until inference is ready.
-    func hotkeyPressed() {
-        guard session == nil else { return }
+    ///
+    /// If another mode is already recording, it is pre-empted. This is what makes switching
+    /// modes mid-hold work: holding ⌃⌥ starts raw, and pressing P while still holding turns
+    /// it into the Prompt mode's shortcut — the raw hold is abandoned and Prompt takes over,
+    /// regardless of which of the two events the system delivers first.
+    func hotkeyPressed(mode: DictationMode) {
+        if let current = session {
+            if current.mode.id == mode.id { return }  // same shortcut twice
+            if !current.isFinishing { discard(current) }
+        }
 
         let configuration = settings.snapshot
         hud.isEnabled = configuration.showHUD
 
-        let session = Session(configuration: configuration)
+        let session = Session(configuration: configuration, mode: mode)
         self.session = session
 
         phase = .listening(level: 0)
@@ -84,9 +98,11 @@ final class DictationController {
         }
     }
 
-    /// The shortcut came up: stop recording and deliver the transcript.
-    func hotkeyReleased() {
-        guard let session, !session.isFinishing else { return }
+    /// A mode's shortcut came up: stop recording and deliver the transcript — but only if
+    /// the mode that came up is the one currently recording. A release for a mode that was
+    /// already pre-empted is ignored.
+    func hotkeyReleased(modeID: String) {
+        guard let session, session.mode.id == modeID, !session.isFinishing else { return }
         session.isFinishing = true
 
         session.finish = Task { [weak self] in
@@ -104,29 +120,31 @@ final class DictationController {
         guard let session, !session.isFinishing else { return }
         Log.app.info("Reached the recording ceiling")
         session.reachedDurationLimit = true
-        hotkeyReleased()
+        hotkeyReleased(modeID: session.mode.id)
     }
 
-    /// Abandons the dictation currently being *recorded*, inserting nothing.
+    /// Abandons the dictation being *recorded* by `modeID`, inserting nothing.
     ///
-    /// Deliberately does nothing once the key has been released. A modifier-only shortcut
-    /// reports a cancelled hold whenever ⌃⌥ turns out to be the start of ⌃⌥⌘F — and that
-    /// hold is not necessarily the one that started the dictation still finishing in the
-    /// background. Without this guard, reaching for an ordinary shortcut kills the
-    /// transcription of whatever was said a moment earlier, which is exactly what the log
-    /// showed as `whisper_full_with_state: failed to encode`.
-    func cancelDictation() {
-        guard let session, !session.isFinishing else { return }
-        self.session = nil
+    /// The id check is load-bearing. A modifier-only shortcut reports a cancelled hold
+    /// whenever ⌃⌥ turns out to be the start of a larger chord — but by then the dictation
+    /// may already have been pre-empted by another mode, or released and now transcribing.
+    /// Cancelling only when the id still matches the recording session keeps a stray cancel
+    /// from killing an unrelated, in-flight dictation.
+    func cancelDictation(modeID: String) {
+        guard let session, session.mode.id == modeID, !session.isFinishing else { return }
+        discard(session)
+        phase = .idle
+        hud.hide()
+    }
 
+    /// Tears down a session's work without touching `phase` or the HUD.
+    private func discard(_ session: Session) {
+        if self.session === session { self.session = nil }
         session.work?.cancel()
         session.finish?.cancel()
         session.chunks.finish()
         Task { [recorder] in await recorder.abort() }
         Task { [transcriber = session.transcriber] in await transcriber?.cancel() }
-
-        phase = .idle
-        hud.hide()
     }
 
     /// Tears down whatever is in flight, at quit.
@@ -274,14 +292,16 @@ final class DictationController {
                 ).text
             }
 
-            let text = TranscriptPostProcessor(
+            let cleaned = TranscriptPostProcessor(
                 capitalizeFirstLetter: session.configuration.capitalizeFirstLetter,
                 appendTrailingSpace: session.configuration.appendTrailingSpace
             ).process(raw)
 
             // The transcript itself is never logged: it is whatever the user just said.
             Log.app.info("Transcribed \(raw.count) raw characters")
-            guard !text.isEmpty else { throw PTTError.emptyTranscript }
+            guard !cleaned.isEmpty else { throw PTTError.emptyTranscript }
+
+            let text = await refine(cleaned, for: session)
 
             try await inserter.insert(
                 text,
@@ -291,9 +311,12 @@ final class DictationController {
             phase = .inserted(characters: text.count)
             Log.app.info("Dictated \(text.count) characters")
 
-            // Say why it ended on its own, otherwise the user is left wondering why the
-            // key stopped working mid-sentence.
-            if session.reachedDurationLimit {
+            // The HUD's closing state, in priority order: a refinement that fell back to
+            // raw is the most important thing to explain, then a self-imposed stop, then
+            // the ordinary silent dismissal.
+            if let refinementError = session.refinementError {
+                hud.flash(.failed(refinementError), for: .seconds(3))
+            } else if session.reachedDurationLimit {
                 // Which ceiling was hit depends on whether the audio had to be kept.
                 let ceiling = recording.samples.isEmpty
                     ? AudioRecorder.streamingLimit
@@ -333,6 +356,39 @@ final class DictationController {
         )
     }
 
+    /// Applies the mode's refinement to `text`, or returns it unchanged.
+    ///
+    /// Refinement is best-effort by design: if the network is down, the key is wrong, or
+    /// the model returns nothing, the *raw* transcript is inserted rather than nothing at
+    /// all. Losing the formatting is a small disappointment; losing the words you just
+    /// spoke is not acceptable. The failure is remembered on the session so the HUD can
+    /// explain it once the text is safely in.
+    private func refine(_ text: String, for session: Session) async -> String {
+        guard session.mode.isRefined, let refiner else { return text }
+
+        phase = .refining(mode: session.mode.name)
+        hud.show(phase)
+
+        do {
+            let refined = try await refiner.refine(
+                text,
+                instruction: session.mode.refinementPrompt
+            )
+            Log.app.info(
+                "Refined via \(session.mode.name, privacy: .public): \(refined.count) chars"
+            )
+            return session.configuration.appendTrailingSpace ? refined + " " : refined
+        } catch is CancellationError {
+            return text
+        } catch {
+            let pttError = (error as? PTTError)
+                ?? .refinementFailed(reason: error.localizedDescription)
+            Log.app.error("Refinement failed: \(pttError.message, privacy: .public)")
+            session.refinementError = pttError
+            return text
+        }
+    }
+
     /// Reports an error through the HUD and returns to idle.
     private func fail(_ session: Session, with error: Error) async {
         let pttError = (error as? PTTError)
@@ -364,6 +420,11 @@ final class DictationController {
 private final class Session {
 
     let configuration: SettingsSnapshot
+
+    /// The mode this dictation runs in — its shortcut identity, and whether and how the
+    /// transcript is refined.
+    let mode: DictationMode
+
     let chunks = ChunkChannel()
 
     /// The custom vocabulary, parsed once per dictation rather than per chunk.
@@ -383,8 +444,13 @@ private final class Session {
     /// `true` when the recorder's ceiling ended this dictation rather than the user.
     var reachedDurationLimit = false
 
-    init(configuration: SettingsSnapshot) {
+    /// Set when refinement was attempted and failed, so the HUD can explain that the raw
+    /// transcript was inserted instead.
+    var refinementError: PTTError?
+
+    init(configuration: SettingsSnapshot, mode: DictationMode) {
         self.configuration = configuration
+        self.mode = mode
         vocabulary = InitialPrompt.parseVocabulary(configuration.customVocabulary)
     }
 }

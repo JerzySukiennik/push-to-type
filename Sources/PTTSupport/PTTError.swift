@@ -49,6 +49,15 @@ public enum PTTError: Error, Sendable, Equatable {
 
     /// The requested key combination could not be registered (usually already taken).
     case hotkeyRegistrationFailed(status: Int32)
+
+    // MARK: Refinement
+
+    /// A refined mode was triggered but no API key has been entered.
+    case refinementKeyMissing
+    /// The refinement request failed (network, HTTP status, or a malformed response).
+    case refinementFailed(reason: String)
+    /// The model returned nothing usable.
+    case refinementEmpty
 }
 
 extension PTTError {
@@ -67,6 +76,9 @@ extension PTTError {
         case .emptyTranscript:           "No speech detected"
         case .insertionFailed:           "Could not insert text"
         case .hotkeyRegistrationFailed:  "Hotkey unavailable"
+        case .refinementKeyMissing:      "No API key"
+        case .refinementFailed:          "AI formatting failed"
+        case .refinementEmpty:           "AI returned nothing"
         }
     }
 
@@ -95,6 +107,12 @@ extension PTTError {
             "The transcript could not be delivered: \(reason)"
         case .hotkeyRegistrationFailed(let status):
             "The shortcut is already in use by another app (error \(status))."
+        case .refinementKeyMissing:
+            "Enter a Gemini API key in Settings to use AI formatting."
+        case .refinementFailed(let reason):
+            "The formatting request failed: \(reason)"
+        case .refinementEmpty:
+            "The model produced no text; the raw transcript was inserted instead."
         }
     }
 
@@ -119,6 +137,12 @@ extension PTTError {
             "Click into a text field before dictating."
         case .hotkeyRegistrationFailed:
             "Pick a different shortcut in Settings."
+        case .refinementKeyMissing:
+            "Open Settings and paste your Gemini API key under AI formatting."
+        case .refinementFailed:
+            "Check your connection and API key. The raw text was inserted."
+        case .refinementEmpty:
+            nil
         }
     }
 
@@ -139,7 +163,7 @@ extension PTTError {
     /// HUD flash instead of a persistent error state.
     public var isBenign: Bool {
         switch self {
-        case .emptyRecording, .emptyTranscript: true
+        case .emptyRecording, .emptyTranscript, .refinementEmpty: true
         default: false
         }
     }

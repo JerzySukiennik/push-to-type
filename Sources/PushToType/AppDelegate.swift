@@ -2,6 +2,7 @@ import AppKit
 import PTTAudio
 import PTTHotkeys
 import PTTInsertion
+import PTTRefine
 import PTTSettings
 import PTTSupport
 import PTTUI
@@ -27,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let models = ModelManager()
     private let inserter = TextInsertionService()
     private let hud = HUDController()
-    private let hotkeyMonitor: any HotkeyMonitoring = HotkeyMonitor()
+    private let hotkeys = HotkeyRouter()
 
     private var controller: DictationController!
     private var menuBar: MenuBarController!
@@ -43,13 +44,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menu bar utility: no Dock icon, no app menu, no window on launch.
         NSApp.setActivationPolicy(.accessory)
 
+        // The refiner reads the model and key on demand, so both take effect on the next
+        // dictation without rebuilding anything.
+        let refiner = GeminiRefiner(
+            modelProvider: { SettingsStore.currentGeminiModel() }
+        )
+
         controller = DictationController(
             settings: settings,
             recorder: recorder,
             engine: engine,
             models: models,
             inserter: inserter,
-            hud: hud
+            hud: hud,
+            refiner: refiner
         )
         controller.onPhaseChange = { [weak self] phase in
             self?.menuBar.apply(phase: phase)
@@ -70,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        hotkeyMonitor.unregister()
+        hotkeys.unregisterAll()
         controller.shutDown()
     }
 
@@ -84,17 +92,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Wiring
 
     private func bindHotkey() {
-        hotkeyMonitor.onPress = { [weak self] in
-            self?.controller.hotkeyPressed()
+        // The router hands back a mode id; the controller is driven by the matching mode.
+        hotkeys.onPress = { [weak self] modeID in
+            guard let self, let mode = self.mode(for: modeID) else { return }
+            self.controller.hotkeyPressed(mode: mode)
         }
-        hotkeyMonitor.onRelease = { [weak self] in
-            self?.controller.hotkeyReleased()
+        hotkeys.onRelease = { [weak self] modeID in
+            self?.controller.hotkeyReleased(modeID: modeID)
         }
-        hotkeyMonitor.onCancel = { [weak self] in
+        hotkeys.onCancel = { [weak self] modeID in
             // The hold was a shortcut or a brush of the hand, not speech.
-            self?.controller.cancelDictation()
+            self?.controller.cancelDictation(modeID: modeID)
         }
-        register(settings.hotkey)
+        registerModes()
 
         // A modifier-only shortcut is invisible until the app is trusted for
         // Accessibility, and macOS gives no notification when that changes. Re-registering
@@ -106,25 +116,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.settings.hotkey.isModifierOnly else { return }
-                self.register(self.settings.hotkey)
+                self?.registerModes()
             }
         }
     }
 
-    /// Registers a binding, reporting failure through the HUD instead of a modal.
-    @discardableResult
-    private func register(_ binding: HotkeyBinding) -> Bool {
-        do {
-            try hotkeyMonitor.register(binding)
-            return true
-        } catch let error as PTTError {
-            Log.app.error("Hotkey registration failed: \(error.message, privacy: .public)")
-            hud.flash(.failed(error), for: .seconds(3))
-            return false
-        } catch {
-            return false
+    /// Registers every active mode's shortcut with the router.
+    ///
+    /// Called on launch, on activation (to pick up a fresh Accessibility grant), and
+    /// whenever the modes change in Settings. Any shortcut the router could not claim is
+    /// flashed once so the user knows a mode is not listening.
+    func registerModes() {
+        let bindings = settings.modes.compactMap { mode -> HotkeyRouter.Binding? in
+            guard let hotkey = mode.hotkey, hotkey.isValid else { return nil }
+            return HotkeyRouter.Binding(modeID: mode.id, hotkey: hotkey)
         }
+        let rejected = hotkeys.setBindings(bindings)
+        if let clash = rejected.first {
+            hud.flash(.failed(.hotkeyRegistrationFailed(status: -1)), for: .seconds(3))
+            Log.app.error("Shortcut unavailable: \(clash, privacy: .public)")
+        }
+    }
+
+    /// Finds the mode a router callback refers to.
+    private func mode(for id: String) -> DictationMode? {
+        settings.modes.first { $0.id == id }
     }
 
     private func makeSettingsViewModel() -> SettingsViewModel {
@@ -159,8 +175,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     await MainActor.run { self?.refreshDownloadedModels() }
                 }
             },
-            applyHotkey: { [weak self] binding in
-                self?.register(binding) ?? false
+            onModesChanged: { [weak self] in
+                self?.registerModes()
             },
             refreshPermissions: {
                 (
@@ -185,7 +201,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !AccessibilityPermission.requestAccess() {
                     NSWorkspace.shared.open(AccessibilityPermission.settingsURL)
                 }
-            }
+            },
+            apiKeyState: { APIKeyStore.hasKey },
+            saveAPIKey: { key in APIKeyStore.setGeminiKey(key) }
         )
     }
 

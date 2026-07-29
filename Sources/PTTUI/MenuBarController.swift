@@ -161,6 +161,8 @@ extension MenuBarController: NSMenuDelegate {
             title = "Listening…"
         case .transcribing:
             title = "Transcribing…"
+        case .refining(let mode):
+            title = "\(mode)…"
         case .downloading(let model, let progress):
             title = "Downloading \(model) — \(Int(progress * 100))%"
         case .failed(let error):

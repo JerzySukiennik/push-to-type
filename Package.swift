@@ -64,10 +64,15 @@ let package = Package(
         /// Delivering the transcript to the focused text field.
         .target(name: "PTTInsertion", dependencies: ["PTTSupport", "PTTSettings"]),
 
+        /// Optional, opt-in refinement of the transcript by a language model (Gemini).
+        .target(name: "PTTRefine", dependencies: ["PTTSupport", "PTTSettings"]),
+
         /// Menu bar item, HUD panel, settings window, onboarding.
         .target(
             name: "PTTUI",
-            dependencies: ["PTTSupport", "PTTSettings", "PTTAudio", "PTTWhisper", "PTTHotkeys"]
+            dependencies: [
+                "PTTSupport", "PTTSettings", "PTTAudio", "PTTWhisper", "PTTHotkeys", "PTTRefine",
+            ]
         ),
 
         // MARK: Application
@@ -77,7 +82,7 @@ let package = Package(
             name: "PushToType",
             dependencies: [
                 "PTTSupport", "PTTSettings", "PTTAudio",
-                "PTTWhisper", "PTTHotkeys", "PTTInsertion", "PTTUI",
+                "PTTWhisper", "PTTHotkeys", "PTTInsertion", "PTTUI", "PTTRefine",
             ],
             linkerSettings: [
                 .linkedLibrary("c++"),

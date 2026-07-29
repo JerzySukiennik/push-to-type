@@ -34,11 +34,20 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
     private nonisolated(unsafe) var hotKeyRef: EventHotKeyRef?
     private nonisolated(unsafe) var eventHandler: EventHandlerRef?
 
-    /// Identifies our hot key in the Carbon event stream.
+    /// Identifies our hot keys in the Carbon event stream.
     private static let signature: OSType = 0x5054_5459  // 'PTTY'
-    private static let identifier: UInt32 = 1
 
-    public init() {}
+    /// This monitor's hot key id, unique across live monitors.
+    ///
+    /// It matters because Carbon delivers a keyboard hot-key event to *every* application
+    /// handler, not just the one that registered the matching combination. With several
+    /// monitors alive at once — one per refined mode — each must recognise only its own id
+    /// and pass the rest along, or two shortcuts would both fire on one press.
+    private let identifier: UInt32
+
+    public init(identifier: UInt32 = 1) {
+        self.identifier = identifier
+    }
 
     deinit {
         // `unregister()` is main-actor isolated and deinit may run anywhere, so the Carbon
@@ -122,7 +131,7 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
             throw PTTError.hotkeyRegistrationFailed(status: -1)
         }
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: Self.identifier)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: identifier)
         var reference: EventHotKeyRef?
 
         let status = RegisterEventHotKey(
@@ -155,10 +164,19 @@ public final class CarbonHotkeyMonitor: HotkeyMonitoring {
     /// Split out of the callback itself because a `@convention(c)` closure's parameters
     /// are `sending`, and a `sending` value cannot be captured by another closure. As an
     /// ordinary function parameter the pointer carries no such restriction.
-    fileprivate nonisolated static func dispatch(kind: UInt32, context: UnsafeMutableRawPointer) {
+    ///
+    /// `eventID` is the id carried by the event. Since every application handler sees every
+    /// hot-key event, a monitor ignores anything that is not its own — otherwise two
+    /// shortcuts registered by two monitors would both fire on one press.
+    fileprivate nonisolated static func dispatch(
+        kind: UInt32,
+        eventID: UInt32,
+        context: UnsafeMutableRawPointer
+    ) {
         let monitor = Unmanaged<CarbonHotkeyMonitor>.fromOpaque(context).takeUnretainedValue()
         // Carbon delivers application event-target handlers on the main thread.
         MainActor.assumeIsolated {
+            guard eventID == monitor.identifier else { return }
             monitor.handle(kind: kind)
         }
     }
@@ -184,6 +202,10 @@ private let hotkeyEventHandler: EventHandlerUPP = { _, event, userData in
     )
     guard status == noErr else { return status }
 
-    CarbonHotkeyMonitor.dispatch(kind: GetEventKind(event), context: userData)
+    CarbonHotkeyMonitor.dispatch(
+        kind: GetEventKind(event),
+        eventID: hotKeyID.id,
+        context: userData
+    )
     return noErr
 }

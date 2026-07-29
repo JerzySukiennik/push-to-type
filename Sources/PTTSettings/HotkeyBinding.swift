@@ -87,6 +87,8 @@ public struct HotkeyBinding: Codable, Equatable, Sendable {
 /// are fixed hardware codes that have not changed since the ADB era.
 public enum KeyCode {
     public static let t: UInt32 = 0x11
+    public static let p: UInt32 = 0x23
+    public static let m: UInt32 = 0x2E
     public static let space: UInt32 = 0x31
     public static let escape: UInt32 = 0x35
     public static let `return`: UInt32 = 0x24

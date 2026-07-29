@@ -31,6 +31,7 @@ public struct SettingsSnapshot: Sendable, Equatable {
     public var streamingEnabled: Bool
     public var keepModelLoaded: Bool
     public var customVocabulary: String
+    public var geminiModel: String
     public var preferAccessibilityInsertion: Bool
     public var capitalizeFirstLetter: Bool
     public var appendTrailingSpace: Bool
@@ -59,6 +60,8 @@ public final class SettingsStore {
 
     private enum Key {
         static let hotkey = "hotkey"
+        static let modes = "dictationModes"
+        static let geminiModel = "geminiModel"
         static let model = "model"
         static let language = "language"
         static let streaming = "streamingEnabled"
@@ -87,17 +90,62 @@ public final class SettingsStore {
         ])
     }
 
+    // MARK: Dictation modes
+
+    /// Every dictation mode, raw and refined, in the order shown in Settings.
+    ///
+    /// The store is seeded on first read. Seeding rather than `register(defaults:)` because
+    /// the value is JSON, not a property-list scalar, and because the seed has to carry
+    /// forward the primary shortcut from the pre-modes version of the app.
+    public var modes: [DictationMode] {
+        get {
+            guard let data = defaults.data(forKey: Key.modes),
+                  let decoded = try? JSONDecoder().decode([DictationMode].self, from: data),
+                  !decoded.isEmpty
+            else { return seededModes() }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            defaults.set(data, forKey: Key.modes)
+        }
+    }
+
+    /// Defaults, but with the raw mode carrying whatever shortcut the user had before modes
+    /// existed — so upgrading never silently changes their shortcut.
+    private func seededModes() -> [DictationMode] {
+        var seed = DictationMode.defaults
+        if let legacy = legacyHotkey,
+           let index = seed.firstIndex(where: { $0.id == DictationMode.rawModeID }) {
+            seed[index].hotkey = legacy
+        }
+        return seed
+    }
+
+    /// The pre-modes hotkey, read straight from its old key. Only used for migration.
+    private var legacyHotkey: HotkeyBinding? {
+        guard let data = defaults.data(forKey: Key.hotkey),
+              let binding = try? JSONDecoder().decode(HotkeyBinding.self, from: data),
+              binding.isValid
+        else { return nil }
+        return binding
+    }
+
+    /// Replaces one mode by id, leaving the rest untouched.
+    public func updateMode(_ mode: DictationMode) {
+        var all = modes
+        guard let index = all.firstIndex(where: { $0.id == mode.id }) else { return }
+        all[index] = mode
+        modes = all
+    }
+
     // MARK: Hotkey
 
-    /// The global push-to-talk combination. Invalid bindings (no modifier) are rejected on
-    /// write, so a corrupted defaults file cannot leave the app with an unusable shortcut.
+    /// The primary (raw) shortcut, exposed under its old name so the menu, onboarding and
+    /// diagnostics keep working unchanged. Reads and writes the raw mode's hotkey.
     public var hotkey: HotkeyBinding {
         get {
-            guard let data = defaults.data(forKey: Key.hotkey),
-                  let binding = try? JSONDecoder().decode(HotkeyBinding.self, from: data),
-                  binding.isValid
-            else { return .default }
-            return binding
+            modes.first { $0.id == DictationMode.rawModeID }?.hotkey ?? .default
         }
         set {
             guard newValue.isValid else {
@@ -106,10 +154,31 @@ public final class SettingsStore {
                 )
                 return
             }
-            guard let data = try? JSONEncoder().encode(newValue) else { return }
-            defaults.set(data, forKey: Key.hotkey)
+            guard var raw = modes.first(where: { $0.id == DictationMode.rawModeID }) else { return }
+            raw.hotkey = newValue
+            updateMode(raw)
         }
     }
+
+    // MARK: Refinement
+
+    /// The Gemini model used for refined modes. Flash is fast and free-tier; anything
+    /// heavier would add latency to a feature whose whole point is speed.
+    public var geminiModel: String {
+        get { defaults.string(forKey: Key.geminiModel) ?? Self.defaultGeminiModel }
+        set { defaults.set(newValue, forKey: Key.geminiModel) }
+    }
+
+    /// The Gemini model, read straight from the preference domain off the main actor.
+    ///
+    /// The refiner runs its request on a background task and needs the current model there;
+    /// `UserDefaults` reads are thread-safe, so this avoids hopping to the main actor for a
+    /// single string mid-request.
+    public nonisolated static func currentGeminiModel() -> String {
+        UserDefaults.appDomain.string(forKey: Key.geminiModel) ?? defaultGeminiModel
+    }
+
+    private nonisolated static let defaultGeminiModel = "gemini-2.0-flash"
 
     // MARK: Speech
 
@@ -207,6 +276,7 @@ public final class SettingsStore {
             streamingEnabled: streamingEnabled,
             keepModelLoaded: keepModelLoaded,
             customVocabulary: customVocabulary,
+            geminiModel: geminiModel,
             preferAccessibilityInsertion: preferAccessibilityInsertion,
             capitalizeFirstLetter: capitalizeFirstLetter,
             appendTrailingSpace: appendTrailingSpace,

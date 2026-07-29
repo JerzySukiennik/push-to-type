@@ -28,30 +28,40 @@ public final class SettingsViewModel {
     public private(set) var isMicrophoneGranted = false
     public private(set) var isAccessibilityGranted = false
 
+    /// `true` when a Gemini API key is stored, so the AI section can show its state.
+    public private(set) var hasAPIKey: Bool = false
+
     // Injected behaviour.
     private let downloadModel: (WhisperModel) async -> Void
     private let deleteModel: (WhisperModel) -> Void
-    private let applyHotkey: (HotkeyBinding) -> Bool
+    private let onModesChanged: () -> Void
     private let refreshPermissions: () async -> (microphone: Bool, accessibility: Bool)
     private let requestMicrophone: () async -> Void
     private let requestAccessibility: () -> Void
+    private let apiKeyState: () -> Bool
+    private let saveAPIKey: (String) -> Void
 
     public init(
         settings: SettingsStore,
         downloadModel: @escaping (WhisperModel) async -> Void,
         deleteModel: @escaping (WhisperModel) -> Void,
-        applyHotkey: @escaping (HotkeyBinding) -> Bool,
+        onModesChanged: @escaping () -> Void,
         refreshPermissions: @escaping () async -> (microphone: Bool, accessibility: Bool),
         requestMicrophone: @escaping () async -> Void,
-        requestAccessibility: @escaping () -> Void
+        requestAccessibility: @escaping () -> Void,
+        apiKeyState: @escaping () -> Bool,
+        saveAPIKey: @escaping (String) -> Void
     ) {
         self.settings = settings
         self.downloadModel = downloadModel
         self.deleteModel = deleteModel
-        self.applyHotkey = applyHotkey
+        self.onModesChanged = onModesChanged
         self.refreshPermissions = refreshPermissions
         self.requestMicrophone = requestMicrophone
         self.requestAccessibility = requestAccessibility
+        self.apiKeyState = apiKeyState
+        self.saveAPIKey = saveAPIKey
+        hasAPIKey = apiKeyState()
     }
 
     // MARK: - Models
@@ -85,18 +95,31 @@ public final class SettingsViewModel {
         refreshModels()
     }
 
-    // MARK: - Hotkey
+    // MARK: - Modes
 
-    /// Applies a new binding. Returns `false` (and records the error) when the system
-    /// refuses it, so the recorder can keep the old value visible.
-    @discardableResult
-    public func apply(hotkey: HotkeyBinding) -> Bool {
-        guard applyHotkey(hotkey) else {
-            lastError = .hotkeyRegistrationFailed(status: -1)
-            return false
-        }
-        lastError = nil
-        return true
+    /// Persists a changed mode and re-registers every shortcut.
+    public func update(_ mode: DictationMode) {
+        settings.updateMode(mode)
+        onModesChanged()
+    }
+
+    /// Sets or clears a mode's shortcut, then re-registers.
+    public func setHotkey(_ hotkey: HotkeyBinding?, for mode: DictationMode) {
+        var updated = mode
+        updated.hotkey = hotkey
+        update(updated)
+    }
+
+    // MARK: - API key
+
+    /// Stores the key (or clears it when blank) and refreshes the shown state.
+    public func saveGeminiKey(_ key: String) {
+        saveAPIKey(key)
+        hasAPIKey = apiKeyState()
+    }
+
+    public func refreshAPIKeyState() {
+        hasAPIKey = apiKeyState()
     }
 
     // MARK: - Permissions

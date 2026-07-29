@@ -143,6 +143,34 @@ without it — but text insertion still does not.
 English-only models (`.en`) are faster *and* more accurate for English. Picking any other
 language automatically switches to the multilingual counterpart.
 
+### Modes — raw and AI-formatted
+
+A **mode** is a shortcut plus, optionally, an instruction for a language model. Ships with:
+
+| Shortcut | Mode | What it does |
+|---|---|---|
+| ⌃⌥ (hold) | Raw | Inserts exactly what you said. Fully offline. |
+| ⌃⌥P | Prompt | Rewrites the transcript into a clean, precise AI prompt. |
+| ⌃⌥M | Wiadomość | Rewrites it into a natural, polished message. |
+
+Each mode's shortcut and instruction are editable in Settings, and you can change the
+prompts or repurpose the modes entirely — the instruction is just text sent to the model.
+
+**Raw stays offline.** Only refined modes reach the network, and only the transcript and
+that mode's instruction are sent — never your vocabulary or anything else.
+
+### AI formatting setup
+
+Refined modes use Google's Gemini API. In Settings › AI formatting:
+
+1. Paste a [Gemini API key](https://aistudio.google.com/apikey). It is stored in your login
+   keychain, never in a file, and you enter it yourself.
+2. Pick a model — Flash is fast and has a free tier.
+
+Until a key is entered, ⌃⌥P and ⌃⌥M dictate and transcribe normally but show a "no API key"
+notice instead of formatting. If a request fails — no connection, a bad key — the **raw
+transcript is inserted anyway**, so a dropped network never costs you your words.
+
 ### Your words
 
 Settings has a **Your words** field for names the model keeps mangling — project names,
