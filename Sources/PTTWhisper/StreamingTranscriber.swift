@@ -52,6 +52,9 @@ public actor StreamingTranscriber {
     private let configuration: Configuration
     private let sampleRate: Double
 
+    /// Terms the user wants spelled their way, prepended to every chunk's prompt.
+    private let vocabulary: [String]
+
     /// Samples not yet handed to a chunk task.
     private var pending: [Float] = []
     /// One task per committed chunk, in order. Each awaits the previous one.
@@ -62,11 +65,13 @@ public actor StreamingTranscriber {
     public init(
         engine: WhisperEngine,
         language: Language,
+        vocabulary: [String] = [],
         configuration: Configuration = .default,
         sampleRate: Double = WhisperEngine.requiredSampleRate
     ) {
         self.engine = engine
         self.language = language
+        self.vocabulary = vocabulary
         self.configuration = configuration
         self.sampleRate = sampleRate
         pending.reserveCapacity(Int(sampleRate * configuration.maximumChunkSeconds))
@@ -149,17 +154,21 @@ public actor StreamingTranscriber {
         let previous = chunkTasks.last
         let engine = self.engine
         let language = self.language
+        let vocabulary = self.vocabulary
 
         chunkTasks.append(
             Task {
-                // Chain: the prompt is whatever came before, and awaiting it also keeps
-                // the output in order.
-                let prompt = try? await previous?.value
+                // Chain: awaiting the previous chunk both orders the output and supplies
+                // the text this one is continuing.
+                let continuation = try? await previous?.value
                 try Task.checkCancellation()
                 let result = try await engine.transcribe(
                     samples: samples,
                     language: language,
-                    initialPrompt: prompt
+                    initialPrompt: InitialPrompt(
+                        vocabulary: vocabulary,
+                        continuation: continuation
+                    ).text
                 )
                 return result.text
             }

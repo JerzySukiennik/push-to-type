@@ -30,6 +30,7 @@ public struct SettingsSnapshot: Sendable, Equatable {
     public var language: Language
     public var streamingEnabled: Bool
     public var keepModelLoaded: Bool
+    public var customVocabulary: String
     public var preferAccessibilityInsertion: Bool
     public var capitalizeFirstLetter: Bool
     public var appendTrailingSpace: Bool
@@ -62,6 +63,7 @@ public final class SettingsStore {
         static let language = "language"
         static let streaming = "streamingEnabled"
         static let keepModelLoaded = "keepModelLoaded"
+        static let vocabulary = "customVocabulary"
         static let preferAX = "preferAccessibilityInsertion"
         static let capitalize = "capitalizeFirstLetter"
         static let trailingSpace = "appendTrailingSpace"
@@ -148,6 +150,16 @@ public final class SettingsStore {
         set { defaults.set(newValue, forKey: Key.keepModelLoaded) }
     }
 
+    /// Names and terms the model should be biased towards, separated by commas or newlines.
+    ///
+    /// Proper nouns are where a general-purpose speech model has nothing to go on: it has
+    /// never seen "GSP" or "Gzowo" as a unit, so it writes what it heard. Listing them
+    /// conditions the decoder to prefer those spellings.
+    public var customVocabulary: String {
+        get { defaults.string(forKey: Key.vocabulary) ?? "" }
+        set { defaults.set(newValue, forKey: Key.vocabulary) }
+    }
+
     // MARK: Insertion
 
     /// Try the Accessibility path before falling back to the clipboard.
@@ -194,6 +206,7 @@ public final class SettingsStore {
             language: language,
             streamingEnabled: streamingEnabled,
             keepModelLoaded: keepModelLoaded,
+            customVocabulary: customVocabulary,
             preferAccessibilityInsertion: preferAccessibilityInsertion,
             capitalizeFirstLetter: capitalizeFirstLetter,
             appendTrailingSpace: appendTrailingSpace,

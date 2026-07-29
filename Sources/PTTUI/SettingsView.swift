@@ -52,6 +52,25 @@ struct SettingsView: View {
                 Toggle("Keep the model in memory", isOn: bindableSettings.keepModelLoaded)
             }
 
+            Section("Your words") {
+                TextEditor(text: bindableSettings.customVocabulary)
+                    .font(.body)
+                    .frame(minHeight: 66)
+                    .overlay(alignment: .topLeading) {
+                        if model.settings.customVocabulary.isEmpty {
+                            Text("Gzowo, GSP, three.js, Rapier")
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                Text("Names the model keeps getting wrong, separated by commas. Listing them makes those spellings more likely — it is a nudge, not a dictionary, so a word can still come out wrong.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Section("Text") {
                 Toggle("Insert directly into the text field", isOn: bindableSettings.preferAccessibilityInsertion)
                 Text("When an app does not support it, PushToType pastes instead and restores your clipboard.")

@@ -146,7 +146,8 @@ final class DictationController {
                 try await prepareEngine(for: session)
                 let transcriber = StreamingTranscriber(
                     engine: engine,
-                    language: session.configuration.language
+                    language: session.configuration.language,
+                    vocabulary: session.vocabulary
                 )
                 session.transcriber = transcriber
                 await flushBacklog(of: session, into: transcriber)
@@ -242,7 +243,8 @@ final class DictationController {
                 try await prepareEngine(for: session)
                 raw = try await engine.transcribe(
                     samples: samples,
-                    language: session.configuration.language
+                    language: session.configuration.language,
+                    initialPrompt: InitialPrompt(vocabulary: session.vocabulary).text
                 ).text
             }
 
@@ -334,6 +336,9 @@ private final class Session {
     let configuration: SettingsSnapshot
     let chunks = ChunkChannel()
 
+    /// The custom vocabulary, parsed once per dictation rather than per chunk.
+    let vocabulary: [String]
+
     var work: Task<Void, Never>?
     var consumer: Task<Void, Never>?
     var finish: Task<Void, Never>?
@@ -347,6 +352,7 @@ private final class Session {
 
     init(configuration: SettingsSnapshot) {
         self.configuration = configuration
+        vocabulary = InitialPrompt.parseVocabulary(configuration.customVocabulary)
     }
 }
 

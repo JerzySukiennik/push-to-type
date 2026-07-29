@@ -125,6 +125,28 @@ without it — but text insertion still does not.
 English-only models (`.en`) are faster *and* more accurate for English. Picking any other
 language automatically switches to the multilingual counterpart.
 
+### Your words
+
+Settings has a **Your words** field for names the model keeps mangling — project names,
+tools, people. They are fed to whisper as the text it believes preceded the audio, which
+makes those spellings more likely. It is a nudge, not a dictionary: a listed word can still
+come out wrong, and a very long list crowds out the sentence being continued.
+
+### Pick the right language
+
+Setting the language explicitly is not only about accuracy. Measured on the same 11-second
+sample with `small`:
+
+| | |
+|---|---|
+| Correct language | 2.13 s — **5.2× real time** |
+| Wrong language forced | 11.59 s — **0.9× real time** |
+
+A mismatch makes whisper fail its own confidence thresholds and re-decode at rising
+temperatures, so it costs roughly five times the wall-clock as well as the quality.
+`Automatic` is a reasonable middle ground for longer speech, but on a one-second
+push-to-talk burst there is barely enough audio to detect from — name the language.
+
 ### How the text gets in
 
 1. **Accessibility API** — written straight into the focused field. Nothing touches your
