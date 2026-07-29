@@ -44,6 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A menu bar utility: no Dock icon, no app menu, no window on launch.
         NSApp.setActivationPolicy(.accessory)
 
+        // Without a main menu, an LSUIElement app's text fields do not respond to ⌘X/⌘C/⌘V
+        // /⌘A: those shortcuts are routed through the Edit menu, and there was none. The
+        // menu is invisible while the app is an accessory, and appears at the top only when
+        // a window is open — which is exactly when the shortcuts are wanted.
+        NSApp.mainMenu = Self.makeMainMenu()
+
         // The refiner reads the model and key on demand, so both take effect on the next
         // dictation without rebuilding anything.
         let refiner = GeminiRefiner(
@@ -87,6 +93,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         windows.showSettings()
         return true
+    }
+
+    // MARK: - Menu
+
+    /// The minimal main menu that makes standard editing shortcuts work.
+    ///
+    /// An app menu is required as the first item — macOS treats it specially — but it can
+    /// be almost empty. The Edit menu is the point: its items wire ⌘X/⌘C/⌘V/⌘A to the
+    /// first responder, so a text field finally accepts a paste.
+    private static func makeMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            withTitle: "Quit PushToType",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        appItem.submenu = appMenu
+
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(
+            withTitle: "Select All",
+            action: #selector(NSResponder.selectAll(_:)),
+            keyEquivalent: "a"
+        )
+        editItem.submenu = editMenu
+
+        return mainMenu
     }
 
     // MARK: - Wiring
