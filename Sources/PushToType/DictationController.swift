@@ -102,7 +102,7 @@ final class DictationController {
     /// truncation — is the worst of the three options available.
     private func stopAtDurationLimit() {
         guard let session, !session.isFinishing else { return }
-        Log.app.info("Reached the \(Int(AudioRecorder.maximumDuration)) s recording limit")
+        Log.app.info("Reached the recording ceiling")
         session.reachedDurationLimit = true
         hotkeyReleased()
     }
@@ -171,6 +171,11 @@ final class DictationController {
                 )
                 session.transcriber = transcriber
                 await flushBacklog(of: session, into: transcriber)
+
+                // The transcriber now owns every sample recorded so far, so the recorder's
+                // copy is dead weight. Dropping it is what lifts the length ceiling: from
+                // here on the dictation costs a few bytes a minute instead of 3.8 MB.
+                await recorder.releaseRetainedAudio()
             }
         } catch is CancellationError {
             // Nothing to report: the user let go or started again.
@@ -234,7 +239,7 @@ final class DictationController {
 
     /// Stops the microphone, resolves the transcript and inserts it.
     private func finishCapture(_ session: Session) async {
-        let samples = await recorder.stop()
+        let recording = await recorder.stop()
         session.chunks.finish()
         await session.consumer?.value  // drains whatever is still buffered
 
@@ -244,13 +249,13 @@ final class DictationController {
         // not ask for, and the two dictations share nothing but the recorder.
         if self.session === session { self.session = nil }
 
-        logCapture(samples)
+        logCapture(recording)
 
         do {
-            guard VoiceActivity.containsSpeech(samples, sampleRate: WhisperEngine.requiredSampleRate)
-            else {
-                throw PTTError.emptyRecording
-            }
+            // The speech test comes from the summary, not from the audio: once retention
+            // has been released there is no audio here to test, and the summary's answer
+            // was computed over the whole recording as it arrived.
+            guard recording.containsSpeech else { throw PTTError.emptyRecording }
 
             phase = .transcribing
             hud.show(phase)
@@ -259,10 +264,11 @@ final class DictationController {
             if let transcriber = session.transcriber {
                 raw = try await transcriber.finish()
             } else {
-                // Streaming is off, or the engine came up after the key was released.
+                // Streaming is off, or the engine came up after the key was released —
+                // either way retention was never released, so the audio is still here.
                 try await prepareEngine(for: session)
                 raw = try await engine.transcribe(
-                    samples: samples,
+                    samples: recording.samples,
                     language: session.configuration.language,
                     initialPrompt: InitialPrompt(vocabulary: session.vocabulary).text
                 ).text
@@ -288,7 +294,11 @@ final class DictationController {
             // Say why it ended on its own, otherwise the user is left wondering why the
             // key stopped working mid-sentence.
             if session.reachedDurationLimit {
-                phase = .limitReached(minutes: Int(AudioRecorder.maximumDuration / 60))
+                // Which ceiling was hit depends on whether the audio had to be kept.
+                let ceiling = recording.samples.isEmpty
+                    ? AudioRecorder.streamingLimit
+                    : AudioRecorder.retainedAudioLimit
+                phase = .limitReached(minutes: Int(ceiling / 60))
                 hud.flash(phase, for: .seconds(3))
             } else {
                 hud.hide()
@@ -312,21 +322,13 @@ final class DictationController {
     /// something was captured but too quietly to pass the gate, or the audio was fine and
     /// the model returned nothing — and they need completely different fixes. One line in
     /// the log tells them apart, without the transcript itself ever being written down.
-    private func logCapture(_ samples: [Float]) {
-        let seconds = Double(samples.count) / WhisperEngine.requiredSampleRate
-        let peak = VoiceActivity.peak(samples[...])
-        let rms = VoiceActivity.rms(samples[...])
-        let passesGate = VoiceActivity.containsSpeech(
-            samples,
-            sampleRate: WhisperEngine.requiredSampleRate
-        )
-
+    private func logCapture(_ recording: RecordingSummary) {
         Log.app.info(
             """
-            Captured \(seconds, format: .fixed(precision: 2)) s — \
-            peak \(peak, format: .fixed(precision: 4)), \
-            rms \(rms, format: .fixed(precision: 4)), \
-            gate \(passesGate ? "passed" : "REJECTED", privacy: .public)
+            Captured \(recording.duration, format: .fixed(precision: 2)) s — \
+            peak \(recording.peak, format: .fixed(precision: 4)), \
+            gate \(recording.containsSpeech ? "passed" : "REJECTED", privacy: .public), \
+            audio kept: \(recording.samples.isEmpty ? "no" : "yes", privacy: .public)
             """
         )
     }
@@ -390,8 +392,8 @@ private final class Session {
 /// An `AsyncStream` of audio chunks, with its continuation kept alongside it.
 ///
 /// The buffer is unbounded on purpose: it absorbs the audio recorded while a cold model
-/// loads. At 16 kHz mono that is 64 kB per second — bounded in practice by the recorder's
-/// own two-minute cap.
+/// loads, which is the only time the consumer is not keeping up. At 16 kHz mono that is
+/// 64 kB per second, for the second or so a model takes to load.
 private struct ChunkChannel {
     let stream: AsyncStream<[Float]>
     let continuation: AsyncStream<[Float]>.Continuation

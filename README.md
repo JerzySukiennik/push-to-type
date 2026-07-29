@@ -165,6 +165,23 @@ temperatures, so it costs roughly five times the wall-clock as well as the quali
 `Automatic` is a reasonable middle ground for longer speech, but on a one-second
 push-to-talk burst there is barely enough audio to detect from — name the language.
 
+### How long you can talk
+
+As long as you like, with streaming on.
+
+The old two-minute cap was really a memory limit in disguise: 16 kHz mono audio costs
+3.8 MB a minute, and the recorder was keeping every sample. But once the streaming
+transcriber has taken over, it already holds the audio — so the recorder drops its copy and
+from then on the dictation costs a few bytes a minute, whatever its length.
+
+| Mode | Ceiling | Why |
+|---|---|---|
+| Streaming on (default) | 1 hour | Not a memory limit — a backstop against a key that never comes up |
+| Streaming off | 5 minutes | Every sample must survive until the single pass at the end |
+
+Reaching either one ends the dictation properly: what was captured is transcribed and
+inserted, and the HUD says why it stopped. Nothing is discarded silently.
+
 ### How the text gets in
 
 1. **Accessibility API** — written straight into the focused field. Nothing touches your
