@@ -26,11 +26,15 @@ public enum DictationPhase: Sendable, Equatable {
     /// Text was inserted. Used for a short confirmation flash.
     case inserted(characters: Int)
 
+    /// Recording ended by itself at the length ceiling. Everything captured up to that
+    /// point was inserted — this is an explanation, not an error.
+    case limitReached(minutes: Int)
+
     /// `true` while the user is expected to keep holding the key.
     public var isActive: Bool {
         switch self {
         case .listening, .transcribing, .downloading: true
-        case .idle, .failed, .inserted: false
+        case .idle, .failed, .inserted, .limitReached: false
         }
     }
 
@@ -44,6 +48,7 @@ public enum DictationPhase: Sendable, Equatable {
             "Downloading \(model) — \(Int(progress * 100))%"
         case .failed(let error): error.title
         case .inserted: "Inserted"
+        case .limitReached(let minutes): "Stopped at \(minutes) minutes — text inserted"
         }
     }
 
@@ -56,13 +61,14 @@ public enum DictationPhase: Sendable, Equatable {
         case .downloading: "⬇️"
         case .failed: "⚠️"
         case .inserted: "✓"
+        case .limitReached: "⏱"
         }
     }
 
     /// SF Symbol for the menu bar item.
     public var menuBarSymbol: String {
         switch self {
-        case .idle, .inserted: "mic"
+        case .idle, .inserted, .limitReached: "mic"
         case .listening: "mic.fill"
         case .transcribing: "waveform"
         case .downloading: "arrow.down.circle"

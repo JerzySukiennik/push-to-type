@@ -155,7 +155,7 @@ extension MenuBarController: NSMenuDelegate {
     private func header(for settings: SettingsSnapshot) -> NSMenuItem {
         let title: String
         switch phase {
-        case .idle, .inserted:
+        case .idle, .inserted, .limitReached:
             title = "Hold \(settings.hotkey.displayString) to dictate"
         case .listening:
             title = "Listening…"

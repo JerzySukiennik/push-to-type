@@ -94,6 +94,19 @@ final class DictationController {
         }
     }
 
+    /// Ends a dictation that has run to the recorder's ceiling.
+    ///
+    /// The old behaviour was to keep recording and throw the surplus away, so a long
+    /// dictation lost its ending with no indication that anything had happened. Finishing
+    /// early keeps every word that was captured and says so; the alternative — silent
+    /// truncation — is the worst of the three options available.
+    private func stopAtDurationLimit() {
+        guard let session, !session.isFinishing else { return }
+        Log.app.info("Reached the \(Int(AudioRecorder.maximumDuration)) s recording limit")
+        session.reachedDurationLimit = true
+        hotkeyReleased()
+    }
+
     /// Abandons the dictation currently being *recorded*, inserting nothing.
     ///
     /// Deliberately does nothing once the key has been released. A modifier-only shortcut
@@ -132,9 +145,16 @@ final class DictationController {
     private func runCapture(_ session: Session) async {
         do {
             let continuation = session.chunks.continuation
-            try await recorder.start { samples in
-                continuation.yield(samples)
-            }
+            try await recorder.start(
+                onChunk: { samples in
+                    continuation.yield(samples)
+                },
+                onLimitReached: { [weak self] in
+                    // Fired on the audio thread; hop to the main actor to end the
+                    // dictation the same way a key release would.
+                    Task { @MainActor in self?.stopAtDurationLimit() }
+                }
+            )
 
             // Consume in parallel with the engine warm-up: the loop updates the level
             // meter straight away and parks the audio until the transcriber exists.
@@ -263,8 +283,16 @@ final class DictationController {
             )
 
             phase = .inserted(characters: text.count)
-            hud.hide()
             Log.app.info("Dictated \(text.count) characters")
+
+            // Say why it ended on its own, otherwise the user is left wondering why the
+            // key stopped working mid-sentence.
+            if session.reachedDurationLimit {
+                phase = .limitReached(minutes: Int(AudioRecorder.maximumDuration / 60))
+                hud.flash(phase, for: .seconds(3))
+            } else {
+                hud.hide()
+            }
 
             if !session.configuration.keepModelLoaded {
                 await engine.unload()
@@ -349,6 +377,9 @@ private final class Session {
 
     /// Set the moment the key comes up, so a repeated release is ignored.
     var isFinishing = false
+
+    /// `true` when the recorder's ceiling ended this dictation rather than the user.
+    var reachedDurationLimit = false
 
     init(configuration: SettingsSnapshot) {
         self.configuration = configuration

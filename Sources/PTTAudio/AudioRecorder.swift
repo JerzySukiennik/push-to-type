@@ -20,10 +20,18 @@ public actor AudioRecorder {
     /// Delivered for every converted buffer (~100 ms) while recording.
     public typealias ChunkHandler = @Sendable ([Float]) -> Void
 
-    /// Longest single dictation. Beyond this the recording stops accumulating, which caps
-    /// memory at a predictable ~7.7 MB rather than growing without bound if a key gets
-    /// stuck.
-    public static let maximumDuration: TimeInterval = 120
+    /// Called once if a dictation runs to ``maximumDuration``.
+    public typealias LimitHandler = @Sendable () -> Void
+
+    /// Longest single dictation.
+    ///
+    /// A cap has to exist — a stuck key would otherwise fill memory until the app died —
+    /// but its old value of two minutes was both short and, worse, *silent*: everything
+    /// past it was dropped on the floor with nothing to show for it. Five minutes is more
+    /// than any push-to-talk utterance, costs 19 MB while recording and nothing at all
+    /// once it ends, and reaching it now stops the dictation properly instead of quietly
+    /// eating the rest.
+    public static let maximumDuration: TimeInterval = 300
 
     private var engine: AVAudioEngine?
     private var buffer: CaptureBuffer?
@@ -40,7 +48,13 @@ public actor AudioRecorder {
     /// - Parameter onChunk: called on the audio thread with each converted buffer. Keep it
     ///   short: no allocation-heavy work, no locks that a slower thread might hold.
     /// - Throws: ``PTTError/microphoneDenied`` or ``PTTError/audioEngineFailed(reason:)``.
-    public func start(onChunk: @escaping ChunkHandler) async throws {
+    /// - Parameter onLimitReached: called once, on the audio thread, the moment the
+    ///   recording reaches ``maximumDuration``. The caller is expected to end the dictation
+    ///   and keep what was captured.
+    public func start(
+        onChunk: @escaping ChunkHandler,
+        onLimitReached: @escaping LimitHandler = {}
+    ) async throws {
         guard engine == nil else { return }
 
         try await MicrophonePermission.require()
@@ -120,8 +134,9 @@ public actor AudioRecorder {
             }
 
             let samples = Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))
-            capture.append(samples)
+            let wasFull = capture.append(samples)
             onChunk(samples)
+            if wasFull { onLimitReached() }
         }
 
         engine.prepare()
@@ -185,17 +200,24 @@ private final class CaptureBuffer: @unchecked Sendable {
         storage.reserveCapacity(min(capacity, Int(WhisperSampleRate.value * 30)))
     }
 
-    /// Appends up to the capacity limit; further audio is discarded.
-    func append(_ samples: [Float]) {
+    /// Appends up to the capacity limit.
+    ///
+    /// - Returns: `true` exactly once — on the call that fills the buffer — so the caller
+    ///   can end the dictation. Reporting it only once matters: the tap fires ten times a
+    ///   second, and a handler invoked on every one of them would be a stampede.
+    @discardableResult
+    func append(_ samples: [Float]) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard storage.count < capacity else { return }
+        guard storage.count < capacity else { return false }
+
         let room = capacity - storage.count
         if samples.count <= room {
             storage.append(contentsOf: samples)
         } else {
             storage.append(contentsOf: samples[..<room])
         }
+        return storage.count >= capacity
     }
 
     /// Returns everything captured and empties the buffer.
